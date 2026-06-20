@@ -162,6 +162,19 @@ Each advisor searches independently.
 > Grounding uses Gemini's native API automatically when the endpoint is Gemini; on
 > other OpenAI-compatible providers seats fall back to ungrounded answers.
 
+### Attachments
+
+Attach **images and documents** to a question with the 📎 button in the composer —
+each council member sees them:
+
+- **Images** (`png/jpg/webp/gif`) and **PDFs** go to the model as native multimodal
+  input (via Gemini's API).
+- **Text-ish docs** (`txt/md/csv/json/code/…`) are read and folded into the prompt as
+  attached context — handy for pasting in, say, an exported Claude.ai conversation.
+
+Up to 6 files, 10 MB each. (Binary attachments use Gemini's native API; on other
+providers, images go through OpenAI-style `image_url` and text docs still work.)
+
 Quick health check once the API is up:
 
 ```bash

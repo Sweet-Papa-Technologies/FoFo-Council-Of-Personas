@@ -54,12 +54,18 @@ function uniqSorted(ids: string[]): string[] {
   return [...new Set(ids)].sort().reverse();
 }
 
+export interface ChatAttachment {
+  mime: string; // e.g. image/png, application/pdf
+  data: string; // base64-encoded bytes
+}
+
 export interface ChatRequest {
   model: string;
   system: string;
   user: string;
   temperature: number;
   search?: boolean; // enable live Google Search grounding (Gemini native)
+  attachments?: ChatAttachment[]; // images / PDFs sent with the question
   signal?: AbortSignal;
 }
 
@@ -94,8 +100,11 @@ export async function streamChat(
   req: ChatRequest,
   onDelta: (delta: string) => void,
 ): Promise<ChatResult> {
-  if (req.search && isGeminiHost(conn.baseUrl)) {
-    return streamGeminiGrounded(conn, req, onDelta);
+  const hasAttachments = !!req.attachments?.length;
+  // Gemini's native API handles grounding AND multimodal (images/PDF) cleanly,
+  // so route there when either is in play.
+  if ((req.search || hasAttachments) && isGeminiHost(conn.baseUrl)) {
+    return streamGeminiNative(conn, req, onDelta);
   }
   return streamOpenAI(conn, req, onDelta);
 }
@@ -118,7 +127,7 @@ async function streamOpenAI(
       stream: true,
       messages: [
         { role: 'system', content: req.system },
-        { role: 'user', content: req.user },
+        { role: 'user', content: openaiUserContent(req) },
       ],
     }),
     signal: req.signal,
@@ -163,8 +172,22 @@ async function streamOpenAI(
   return { text: full, sources: [], queries: [] };
 }
 
-/** Gemini native grounded streaming via :streamGenerateContent + googleSearch. */
-async function streamGeminiGrounded(
+// Build OpenAI-style user content — a plain string, or a multimodal array when
+// images are attached (text-ish docs are folded into req.user upstream).
+function openaiUserContent(req: ChatRequest): unknown {
+  const images = (req.attachments ?? []).filter((a) => a.mime.startsWith('image/'));
+  if (!images.length) return req.user;
+  return [
+    { type: 'text', text: req.user },
+    ...images.map((a) => ({
+      type: 'image_url',
+      image_url: { url: `data:${a.mime};base64,${a.data}` },
+    })),
+  ];
+}
+
+/** Gemini native streaming via :streamGenerateContent — grounding + multimodal. */
+async function streamGeminiNative(
   conn: Connection,
   req: ChatRequest,
   onDelta: (delta: string) => void,
@@ -172,6 +195,11 @@ async function streamGeminiGrounded(
   // baseUrl is …/v1beta/openai — the native API is at …/v1beta/models/<model>:…
   const root = conn.baseUrl.replace(/\/openai\/?$/, '').replace(/\/+$/, '');
   const url = `${root}/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
+
+  const parts: unknown[] = [{ text: req.user }];
+  for (const a of req.attachments ?? []) {
+    parts.push({ inlineData: { mimeType: a.mime, data: a.data } });
+  }
 
   const res = await fetch(url, {
     method: 'POST',
@@ -181,8 +209,8 @@ async function streamGeminiGrounded(
     },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: req.system }] },
-      contents: [{ role: 'user', parts: [{ text: req.user }] }],
-      tools: [{ googleSearch: {} }],
+      contents: [{ role: 'user', parts }],
+      ...(req.search ? { tools: [{ googleSearch: {} }] } : {}),
       generationConfig: { temperature: req.temperature },
     }),
     signal: req.signal,

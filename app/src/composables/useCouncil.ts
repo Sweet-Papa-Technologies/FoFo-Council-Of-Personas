@@ -185,6 +185,7 @@ export function useCouncil() {
       chairmanModel?: string;
       searchOverrides?: Record<number, boolean>;
       chairmanSearch?: boolean;
+      attachments?: { name: string; mime: string; text?: string; data?: string }[];
     } = {},
   ) {
     if (running.value) return;
@@ -206,6 +207,7 @@ export function useCouncil() {
           ...(typeof opts.chairmanSearch === 'boolean'
             ? { chairman_search: opts.chairmanSearch }
             : {}),
+          ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
         }),
       });
       if (!res.ok || !res.body) {

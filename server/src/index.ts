@@ -103,6 +103,7 @@ app.post('/api/council/run', async (c) => {
     chairman_model?: string;
     search_overrides?: Record<string, boolean>;
     chairman_search?: boolean;
+    attachments?: { name: string; mime: string; text?: string; data?: string }[];
   };
   try {
     body = await c.req.json();
@@ -119,6 +120,7 @@ app.post('/api/council/run', async (c) => {
     searchOverrides: body.search_overrides as Record<number, boolean> | undefined,
     chairmanSearch:
       typeof body.chairman_search === 'boolean' ? body.chairman_search : undefined,
+    attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
   };
 
   // Fail fast with a normal HTTP error if config is broken, rather than opening

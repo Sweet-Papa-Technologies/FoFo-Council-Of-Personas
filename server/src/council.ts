@@ -8,7 +8,14 @@ import {
   type Persona,
   type CouncilConfig,
 } from './config';
-import { streamChat } from './llm';
+import { streamChat, type ChatAttachment } from './llm';
+
+export interface RunAttachment {
+  name: string;
+  mime: string;
+  text?: string; // text-ish docs are folded into the prompt
+  data?: string; // base64 bytes for images / PDFs
+}
 
 export type Emit = (event: string, data: unknown) => void;
 
@@ -47,6 +54,7 @@ async function runSeat(
   question: string,
   defaultModel: string,
   search: boolean,
+  attachments: ChatAttachment[],
   emit: Emit,
   signal: AbortSignal,
 ): Promise<SeatResult> {
@@ -60,6 +68,7 @@ async function runSeat(
         user: question,
         temperature: tempFor(persona, cfg.settings.council_temperature),
         search,
+        attachments,
         signal,
       },
       (delta) => emit('member_token', { id, delta }),
@@ -242,6 +251,7 @@ export interface RunOptions {
   searchOverrides?: Record<number, boolean>; // per-seat web-search override, by id
   chairmanSearch?: boolean; // web-search override for the chairman
   searchAll?: boolean; // blanket web-search override for every seat + chairman (CLI)
+  attachments?: RunAttachment[]; // files attached to the question (council members see them)
 }
 
 export async function runCouncil(
@@ -264,6 +274,19 @@ export async function runCouncil(
     opts.searchAll ?? opts.searchOverrides?.[id] ?? p.search ?? cfg.settings.web_search;
   const chairmanSearch =
     opts.searchAll ?? opts.chairmanSearch ?? cfg.chairman.search ?? cfg.settings.web_search;
+
+  // Attachments: text docs fold into the council members' prompt; images/PDFs go
+  // to the model as binary parts. (Reviewers and the Chairman work from answers.)
+  const atts = opts.attachments ?? [];
+  const textBlocks = atts
+    .filter((a) => typeof a.text === 'string' && a.text)
+    .map((a) => `### ${a.name}\n${a.text}`);
+  const binaryAtts: ChatAttachment[] = atts
+    .filter((a) => a.data)
+    .map((a) => ({ mime: a.mime, data: a.data as string }));
+  const memberQuestion = textBlocks.length
+    ? `${question}\n\n--- Attached context ---\n${textBlocks.join('\n\n')}\n--- End attached context ---`
+    : question;
 
   const roster = cfg.council.map((p, i) => ({
     persona: p,
@@ -291,7 +314,7 @@ export async function runCouncil(
   emit('stage', { stage: 'fanout' });
   const seats = await Promise.all(
     roster.map((r) =>
-      runSeat(conn, cfg, r.persona, r.id, r.label, question, councilModel, r.search, emit, signal),
+      runSeat(conn, cfg, r.persona, r.id, r.label, memberQuestion, councilModel, r.search, binaryAtts, emit, signal),
     ),
   );
 

@@ -107,20 +107,50 @@
 
       <!-- Scrollable chamber -->
       <div class="chamber">
-        <!-- Command input -->
-        <div class="cmd">
-          <q-icon name="terminal" class="cmd-icon" />
-          <input
-            v-model="question"
-            class="cmd-input font-mono"
-            :disabled="running"
-            placeholder="Enter directive for Council debate…"
-            @keydown.enter="submit"
-          />
-          <button class="cmd-send label-caps" :disabled="!question.trim() || running" @click="submit">
-            <q-spinner v-if="running" size="16px" />
-            <template v-else><q-icon name="gavel" size="16px" /> Convene</template>
-          </button>
+        <!-- Command composer -->
+        <div class="composer">
+          <!-- Attachment chips -->
+          <div v-if="attachments.length" class="att-row">
+            <div v-for="a in attachments" :key="a.id" class="att-chip" :title="a.name">
+              <q-icon :name="attIcon(a.kind)" size="14px" />
+              <span class="att-name font-mono">{{ a.name }}</span>
+              <span class="att-size font-mono">{{ prettySize(a.size) }}</span>
+              <button class="att-x" :disabled="running" @click="removeAttachment(a.id)">
+                <q-icon name="close" size="13px" />
+              </button>
+            </div>
+          </div>
+
+          <div class="cmd">
+            <input
+              ref="fileInput"
+              type="file"
+              multiple
+              class="hidden-file"
+              accept="image/*,application/pdf,text/*,.md,.markdown,.txt,.csv,.json,.yaml,.yml,.js,.ts,.tsx,.jsx,.py,.html,.css,.log"
+              @change="onFiles"
+            />
+            <button
+              class="cmd-attach"
+              :disabled="running || attachments.length >= MAX_FILES"
+              title="Attach images or documents"
+              @click="fileInput?.click()"
+            >
+              <q-icon name="attach_file" size="18px" />
+            </button>
+            <input
+              v-model="question"
+              class="cmd-input font-mono"
+              :disabled="running"
+              placeholder="Enter directive for Council debate…"
+              @keydown.enter="submit"
+            />
+            <button class="cmd-send label-caps" :disabled="!question.trim() || running" @click="submit">
+              <q-spinner v-if="running" size="16px" />
+              <template v-else><q-icon name="gavel" size="16px" /> Convene</template>
+            </button>
+          </div>
+          <div v-if="attError" class="att-error font-mono">{{ attError }}</div>
         </div>
 
         <!-- Persona grid -->
@@ -533,6 +563,66 @@ function toggleHist(id: number) {
   expandedHist.value = expandedHist.value === id ? null : id;
 }
 
+// ---- Attachments ---------------------------------------------------------
+interface Attachment {
+  id: number; name: string; mime: string; size: number;
+  kind: 'image' | 'pdf' | 'text'; text?: string; data?: string;
+}
+const MAX_FILES = 6;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const fileInput = ref<HTMLInputElement | null>(null);
+const attachments = ref<Attachment[]>([]);
+const attError = ref('');
+let attSeq = 0;
+
+function attIcon(kind: Attachment['kind']): string {
+  return kind === 'image' ? 'image' : kind === 'pdf' ? 'picture_as_pdf' : 'description';
+}
+function prettySize(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+function classify(f: File): Attachment['kind'] | null {
+  if (f.type.startsWith('image/')) return 'image';
+  if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) return 'pdf';
+  if (f.type.startsWith('text/') ||
+      /\.(md|markdown|txt|csv|json|ya?ml|js|ts|tsx|jsx|py|html|css|log)$/i.test(f.name)) return 'text';
+  return null;
+}
+async function toBase64(f: File): Promise<string> {
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+async function onFiles(e: Event) {
+  const input = e.target as HTMLInputElement;
+  attError.value = '';
+  for (const f of Array.from(input.files ?? [])) {
+    if (attachments.value.length >= MAX_FILES) { attError.value = `Up to ${MAX_FILES} files.`; break; }
+    if (f.size > MAX_FILE_BYTES) { attError.value = `"${f.name}" exceeds 10 MB.`; continue; }
+    const kind = classify(f);
+    if (!kind) { attError.value = `"${f.name}": unsupported type.`; continue; }
+    try {
+      const a: Attachment = {
+        id: ++attSeq, name: f.name, size: f.size, kind,
+        mime: f.type || (kind === 'pdf' ? 'application/pdf' : 'text/plain'),
+      };
+      if (kind === 'text') a.text = await f.text();
+      else a.data = await toBase64(f);
+      attachments.value.push(a);
+    } catch { attError.value = `Could not read "${f.name}".`; }
+  }
+  input.value = '';
+}
+function removeAttachment(id: number) {
+  attachments.value = attachments.value.filter((a) => a.id !== id);
+}
+
 const hasRun = computed(() => members.length > 0 || !!chairman.content);
 const respondedCount = computed(() => members.filter((m) => m.status === 'done').length);
 const synthesisHtml = computed(() => renderMarkdown(chairman.content));
@@ -596,6 +686,7 @@ function submit() {
       chairmanModel?: string;
       searchOverrides?: Record<number, boolean>;
       chairmanSearch?: boolean;
+      attachments?: { name: string; mime: string; text?: string; data?: string }[];
     } = { peerReview: peerReviewOn.value };
     if (modelSel.council) opts.councilModel = modelSel.council;
     if (modelSel.review) opts.reviewModel = modelSel.review;
@@ -606,6 +697,16 @@ function submit() {
       opts.searchOverrides = so;
       opts.chairmanSearch = searchOn('chairman', config.value.chairman?.search);
     }
+    if (attachments.value.length) {
+      opts.attachments = attachments.value.map((a) => {
+        const o: { name: string; mime: string; text?: string; data?: string } = {
+          name: a.name, mime: a.mime,
+        };
+        if (a.kind === 'text') { if (a.text) o.text = a.text; }
+        else if (a.data) o.data = a.data;
+        return o;
+      });
+    }
     void ask(q, opts);
   }
 }
@@ -613,6 +714,8 @@ function newSession() {
   if (running.value) return;
   reset();
   question.value = '';
+  attachments.value = [];
+  attError.value = '';
 }
 </script>
 
@@ -766,15 +869,23 @@ function newSession() {
   padding: var(--pad);
   background: linear-gradient(to bottom, var(--c-bg), var(--c-surface-lowest));
 }
+.composer { max-width: var(--content-max); margin: 0 auto 16px; }
 .cmd {
-  max-width: var(--content-max); margin: 0 auto 16px;
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
   background: var(--c-surface-low);
-  border: 1px solid var(--c-outline-variant); border-radius: 8px;
-  padding: 6px 6px 6px 14px; transition: border-color 0.2s;
+  border: 1px solid var(--c-outline-variant); border-radius: 10px;
+  padding: 6px 6px 6px 8px; transition: border-color 0.2s, box-shadow 0.2s;
 }
 .cmd:focus-within { border-color: var(--c-primary); box-shadow: 0 0 0 1px var(--c-primary); }
-.cmd-icon { color: var(--c-outline); }
+.hidden-file { display: none; }
+.cmd-attach {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex: none;
+  background: none; border: none; border-radius: 8px; cursor: pointer;
+  color: var(--c-outline); transition: background 0.15s, color 0.15s;
+}
+.cmd-attach:hover:not(:disabled) { background: var(--c-surface-high); color: var(--c-primary); }
+.cmd-attach:disabled { opacity: 0.4; cursor: not-allowed; }
 .cmd-input {
   flex: 1; background: transparent; border: none; outline: none;
   color: var(--c-on-surface); font-size: 14px; padding: 10px 0;
@@ -783,11 +894,33 @@ function newSession() {
 .cmd-send {
   display: flex; align-items: center; gap: 6px;
   background: var(--c-primary); color: var(--c-on-primary);
-  border: none; border-radius: 6px; padding: 10px 16px; cursor: pointer;
+  border: none; border-radius: 7px; padding: 10px 16px; cursor: pointer;
   transition: filter 0.15s;
 }
 .cmd-send:hover:not(:disabled) { filter: brightness(1.1); }
 .cmd-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Attachment chips */
+.att-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.att-chip {
+  display: flex; align-items: center; gap: 7px;
+  background: var(--c-surface-low); border: 1px solid var(--c-outline-variant);
+  border-radius: 8px; padding: 6px 8px 6px 10px; max-width: 280px;
+  color: var(--c-on-surface-variant);
+}
+.att-chip .q-icon { color: var(--c-primary); flex: none; }
+.att-name {
+  font-size: 12px; color: var(--c-on-surface);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.att-size { font-size: 10px; color: var(--c-outline); flex: none; }
+.att-x {
+  display: flex; flex: none; background: none; border: none; cursor: pointer;
+  color: var(--c-outline); padding: 2px; border-radius: 4px;
+}
+.att-x:hover:not(:disabled) { color: var(--c-red); background: var(--c-surface-high); }
+.att-x:disabled { opacity: 0.4; cursor: not-allowed; }
+.att-error { color: var(--c-red); font-size: 11px; margin-top: 6px; }
 
 /* Persona grid */
 .grid {
