@@ -54,17 +54,20 @@ app.get('/api/config', (c) => {
     endpoint,
     default_model: defaultModel,
     settings: cfg.settings,
-    council: cfg.council.map((p) => ({
+    council: cfg.council.map((p, i) => ({
+      id: i,
       name: p.name,
       tagline: p.tagline ?? null,
       accent: p.accent ?? null,
       model: p.model ?? null,
       temperature: p.temperature ?? null,
+      search: p.search ?? cfg.settings.web_search,
     })),
     chairman: {
       name: cfg.chairman.name,
       model: cfg.chairman.model ?? null,
       temperature: cfg.chairman.temperature ?? null,
+      search: cfg.chairman.search ?? cfg.settings.web_search,
     },
   });
 });
@@ -98,6 +101,8 @@ app.post('/api/council/run', async (c) => {
     council_model?: string;
     review_model?: string;
     chairman_model?: string;
+    search_overrides?: Record<string, boolean>;
+    chairman_search?: boolean;
   };
   try {
     body = await c.req.json();
@@ -111,6 +116,9 @@ app.post('/api/council/run', async (c) => {
     councilModel: body.council_model || undefined,
     reviewModel: body.review_model || undefined,
     chairmanModel: body.chairman_model || undefined,
+    searchOverrides: body.search_overrides as Record<number, boolean> | undefined,
+    chairmanSearch:
+      typeof body.chairman_search === 'boolean' ? body.chairman_search : undefined,
   };
 
   // Fail fast with a normal HTTP error if config is broken, rather than opening

@@ -46,23 +46,25 @@ async function runSeat(
   label: string,
   question: string,
   defaultModel: string,
+  search: boolean,
   emit: Emit,
   signal: AbortSignal,
 ): Promise<SeatResult> {
   emit('member_start', { id });
   try {
-    let content = '';
-    content = await streamChat(
+    const { text: content, sources } = await streamChat(
       conn,
       {
         model: persona.model ?? defaultModel,
         system: persona.system_prompt,
         user: question,
         temperature: tempFor(persona, cfg.settings.council_temperature),
+        search,
         signal,
       },
       (delta) => emit('member_token', { id, delta }),
     );
+    if (sources.length) emit('member_sources', { id, sources });
     emit('member_done', { id, content });
     return { id, name: persona.name, label, ok: true, content };
   } catch (err) {
@@ -122,10 +124,10 @@ async function runReview(
     `FINAL RANKING:\n1. Advisor <letter>\n2. Advisor <letter>\n...`;
 
   try {
-    const content = await streamChat(
+    const { text: content } = await streamChat(
       conn,
       {
-        // Peer review is the lightweight "fast" tier.
+        // Peer review is the lightweight "fast" tier (no web search).
         model: reviewModel,
         system: persona.system_prompt,
         user,
@@ -180,6 +182,7 @@ async function runChairman(
   seats: SeatResult[],
   rankingSummary: string | null,
   chairmanModel: string,
+  search: boolean,
   emit: Emit,
   signal: AbortSignal,
 ): Promise<void> {
@@ -208,7 +211,7 @@ async function runChairman(
     `Now deliver your synthesis.`;
 
   try {
-    const content = await streamChat(
+    const { text: content, sources } = await streamChat(
       conn,
       {
         model: chairmanModel,
@@ -216,10 +219,12 @@ async function runChairman(
         user,
         temperature:
           cfg.chairman.temperature ?? cfg.settings.chairman_temperature,
+        search,
         signal,
       },
       (delta) => emit('chairman_token', { delta }),
     );
+    if (sources.length) emit('chairman_sources', { sources });
     emit('chairman_done', { content });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -234,6 +239,9 @@ export interface RunOptions {
   councilModel?: string; // overrides default for council seats (medium tier)
   reviewModel?: string; // overrides peer-review model (fast tier)
   chairmanModel?: string; // overrides chairman model (hard tier)
+  searchOverrides?: Record<number, boolean>; // per-seat web-search override, by id
+  chairmanSearch?: boolean; // web-search override for the chairman
+  searchAll?: boolean; // blanket web-search override for every seat + chairman (CLI)
 }
 
 export async function runCouncil(
@@ -251,10 +259,17 @@ export async function runCouncil(
   const reviewModel = opts.reviewModel || cfg.settings.review_model || councilModel;
   const chairmanModel = opts.chairmanModel || cfg.chairman.model || conn.model;
 
+  // Effective web-search per role — blanket → per-seat override → config → settings default.
+  const seatSearch = (p: typeof cfg.council[number], id: number): boolean =>
+    opts.searchAll ?? opts.searchOverrides?.[id] ?? p.search ?? cfg.settings.web_search;
+  const chairmanSearch =
+    opts.searchAll ?? opts.chairmanSearch ?? cfg.chairman.search ?? cfg.settings.web_search;
+
   const roster = cfg.council.map((p, i) => ({
     persona: p,
     id: i,
     label: anonLabel(i),
+    search: seatSearch(p, i),
   }));
 
   emit('roster', {
@@ -265,16 +280,18 @@ export async function runCouncil(
       accent: r.persona.accent,
       icon: r.persona.icon,
       tagline: r.persona.tagline,
+      search: r.search,
     })),
     peer_review: peerReview,
     chairman: cfg.chairman.name,
+    chairman_search: chairmanSearch,
   });
 
   // Stage 1 — fan out in parallel; each seat catches its own errors.
   emit('stage', { stage: 'fanout' });
   const seats = await Promise.all(
     roster.map((r) =>
-      runSeat(conn, cfg, r.persona, r.id, r.label, question, councilModel, emit, signal),
+      runSeat(conn, cfg, r.persona, r.id, r.label, question, councilModel, r.search, emit, signal),
     ),
   );
 
@@ -310,7 +327,7 @@ export async function runCouncil(
 
   // Stage 3 — chairman synthesis.
   emit('stage', { stage: 'chairman' });
-  await runChairman(conn, cfg, question, seats, rankingSummary, chairmanModel, emit, signal);
+  await runChairman(conn, cfg, question, seats, rankingSummary, chairmanModel, chairmanSearch, emit, signal);
 
   emit('done', {});
 }

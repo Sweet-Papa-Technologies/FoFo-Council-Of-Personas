@@ -21,6 +21,11 @@ settings:
   # Peer review is a light read-and-rank task → run it on the fast tier.
   review_model: gemini-3.1-flash-lite
 
+  # Default web-search (live Google Search grounding, Gemini-native) for any seat
+  # that doesn't set `search` itself. Per-seat `search:` overrides this; the UI
+  # (Global Settings → Web search) can also toggle it per seat per run.
+  web_search: false
+
   # Same model + similar prompts collapses to similar answers, so we run the
   # council HOT to maximize spread. Per-persona `temperature` overrides this.
   council_temperature: 0.9
@@ -82,6 +87,8 @@ council:
     accent: gold
     icon: science
     tagline: Technical Authority
+    # The expert benefits most from current facts → web search on by default.
+    search: true
     system_prompt: |
       You are the DOMAIN EXPERT on an advisory council. You are rigorous and precise.
       - Reason from first principles and underlying mechanisms, not analogies or vibes.

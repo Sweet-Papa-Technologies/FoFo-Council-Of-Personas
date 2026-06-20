@@ -84,6 +84,22 @@
             <div v-else class="hero-idle font-mono">
               <span class="blinking-cursor">{{ stage === 'chairman' ? 'Synthesizing the council’s positions…' : 'Council in deliberation…' }}</span>
             </div>
+            <div v-if="chairman.sources.length" class="sources hero-sources">
+              <div class="sources-head label-caps">
+                <q-icon name="travel_explore" size="13px" /> {{ chairman.sources.length }} sources
+              </div>
+              <div class="sources-list">
+                <a
+                  v-for="(s, i) in chairman.sources"
+                  :key="i"
+                  :href="s.uri"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="source-link font-mono"
+                  :title="s.title"
+                >{{ s.title }}</a>
+              </div>
+            </div>
           </div>
         </div>
         <div class="hero-accent-border"></div>
@@ -120,7 +136,16 @@
               <div class="who">
                 <div class="chip"><q-icon :name="m.icon" size="18px" /></div>
                 <div>
-                  <div class="role label-caps">{{ m.name }}</div>
+                  <div class="role label-caps">
+                    {{ m.name }}
+                    <q-icon
+                      v-if="m.searchEnabled"
+                      name="travel_explore"
+                      size="13px"
+                      class="search-flag"
+                      :title="'Web search enabled'"
+                    />
+                  </div>
                   <div class="tagline">{{ m.tagline }}</div>
                 </div>
               </div>
@@ -134,6 +159,24 @@
               <span v-if="m.status === 'error'" class="err">&gt; ERROR: {{ m.error }}</span>
               <template v-else-if="m.answer">{{ m.answer }}</template>
               <span v-else class="muted blinking-cursor">&gt; {{ awaitingText(m) }}</span>
+            </div>
+
+            <!-- Web sources -->
+            <div v-if="m.sources.length" class="sources">
+              <div class="sources-head label-caps">
+                <q-icon name="travel_explore" size="13px" /> {{ m.sources.length }} sources
+              </div>
+              <div class="sources-list">
+                <a
+                  v-for="(s, i) in m.sources"
+                  :key="i"
+                  :href="s.uri"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="source-link font-mono"
+                  :title="s.title"
+                >{{ s.title }}</a>
+              </div>
             </div>
 
             <!-- Peer critique -->
@@ -278,6 +321,44 @@
                 Defaults come from <code>council.yaml</code>; your picks are saved in this browser.
               </p>
 
+              <div class="set-title label-caps">Web search</div>
+              <p class="panel-note font-mono">
+                Grounds a seat's answer with live Google Search (Gemini). Each advisor
+                researches on its own. Saved in this browser; applies next run.
+              </p>
+              <div
+                v-for="p in config.council"
+                :key="p.id"
+                class="search-row"
+                :class="`accent-${p.accent || 'blue'}`"
+              >
+                <span class="dot solid"></span>
+                <span class="role label-caps">{{ p.name }}</span>
+                <button
+                  class="mini-toggle"
+                  :class="{ on: searchOn(String(p.id), p.search) }"
+                  @click="toggleSearch(String(p.id), p.search)"
+                >
+                  <span class="mini-switch"><span class="mini-knob"></span></span>
+                </button>
+              </div>
+              <div class="search-row accent-blue">
+                <span class="dot solid"></span>
+                <span class="role label-caps">{{ config.chairman.name }}</span>
+                <button
+                  class="mini-toggle"
+                  :class="{ on: searchOn('chairman', config.chairman.search) }"
+                  @click="toggleSearch('chairman', config.chairman.search)"
+                >
+                  <span class="mini-switch"><span class="mini-knob"></span></span>
+                </button>
+              </div>
+              <div class="set-actions">
+                <button class="reset-btn label-caps" :disabled="!searchOverridden" @click="resetSearch">
+                  <q-icon name="restart_alt" size="14px" /> Reset search
+                </button>
+              </div>
+
               <div class="set-title label-caps">Environment</div>
               <dl class="settings-list font-mono">
                 <div><dt>Endpoint</dt><dd>{{ config.endpoint || '—' }}</dd></div>
@@ -381,17 +462,54 @@ watch(modelSel, () => {
   } catch { /* ignore */ }
 }, { deep: true });
 
+// ---- Web search (which seats search the web) -----------------------------
+const LS_SEARCH = 'cop.searchOverrides';
+const searchSel = reactive<Record<string, boolean>>({});
+
+const defaultSearch = computed<Record<string, boolean>>(() => {
+  const d: Record<string, boolean> = {};
+  for (const p of config.value?.council ?? []) d[String(p.id)] = !!p.search;
+  d.chairman = !!config.value?.chairman?.search;
+  return d;
+});
+const searchOverridden = computed(() =>
+  Object.keys(defaultSearch.value).some(
+    (k) => (searchSel[k] ?? defaultSearch.value[k]) !== defaultSearch.value[k],
+  ),
+);
+function searchOn(key: string, dflt: boolean | undefined): boolean {
+  return searchSel[key] ?? !!dflt;
+}
+function toggleSearch(key: string, dflt: boolean | undefined) {
+  searchSel[key] = !searchOn(key, dflt);
+}
+function resetSearch() {
+  for (const [k, v] of Object.entries(defaultSearch.value)) searchSel[k] = v;
+  try { localStorage.removeItem(LS_SEARCH); } catch { /* ignore */ }
+}
+watch(searchSel, () => {
+  try {
+    if (searchOverridden.value) localStorage.setItem(LS_SEARCH, JSON.stringify({ ...searchSel }));
+    else localStorage.removeItem(LS_SEARCH);
+  } catch { /* ignore */ }
+}, { deep: true });
+
 onMounted(async () => {
   void checkHealth();
   try {
-    const saved = localStorage.getItem(LS_MODELS); // restore overrides across reloads
-    if (saved) Object.assign(modelSel, JSON.parse(saved));
+    const m = localStorage.getItem(LS_MODELS); // restore overrides across reloads
+    if (m) Object.assign(modelSel, JSON.parse(m));
+    const s = localStorage.getItem(LS_SEARCH);
+    if (s) Object.assign(searchSel, JSON.parse(s));
   } catch { /* ignore */ }
   await ensureConfig();
   const d = defaultModels.value; // fill any unset role with its default
   if (!modelSel.council) modelSel.council = d.council;
   if (!modelSel.review) modelSel.review = d.review;
   if (!modelSel.chairman) modelSel.chairman = d.chairman;
+  for (const [k, v] of Object.entries(defaultSearch.value)) {
+    if (searchSel[k] === undefined) searchSel[k] = v;
+  }
   try {
     const j = await (await fetch('/api/models')).json();
     if (Array.isArray(j.models)) availableModels.value = j.models.map((m: any) => m.id);
@@ -476,10 +594,18 @@ function submit() {
       councilModel?: string;
       reviewModel?: string;
       chairmanModel?: string;
+      searchOverrides?: Record<number, boolean>;
+      chairmanSearch?: boolean;
     } = { peerReview: peerReviewOn.value };
     if (modelSel.council) opts.councilModel = modelSel.council;
     if (modelSel.review) opts.reviewModel = modelSel.review;
     if (modelSel.chairman) opts.chairmanModel = modelSel.chairman;
+    if (config.value?.council) {
+      const so: Record<number, boolean> = {};
+      for (const p of config.value.council) so[p.id] = searchOn(String(p.id), p.search);
+      opts.searchOverrides = so;
+      opts.chairmanSearch = searchOn('chairman', config.value.chairman?.search);
+    }
     void ask(q, opts);
   }
 }
@@ -782,6 +908,49 @@ function newSession() {
 .cfg-row .dot { margin-top: 5px; }
 .cfg-row .role { color: var(--accent); }
 .cfg-sub { font-size: 11px; color: var(--c-on-surface-variant); margin-top: 3px; }
+
+/* Web search: card flag + sources */
+.search-flag { color: var(--accent); margin-left: 4px; vertical-align: -1px; opacity: 0.9; }
+.sources { margin-top: 12px; }
+.sources-head {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--c-on-surface-variant); font-size: 10px; margin-bottom: 6px;
+}
+.sources-head .q-icon { color: var(--accent, var(--c-primary)); }
+.sources-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.source-link {
+  font-size: 11px; max-width: 100%;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(6, 14, 32, 0.6);
+  border: 1px solid var(--c-outline-variant);
+  color: var(--c-on-surface-variant); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: border-color 0.15s, color 0.15s;
+}
+.source-link:hover { border-color: var(--c-primary); color: var(--c-primary); }
+.hero-sources { margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(69, 70, 81, 0.3); }
+
+/* Settings: web-search toggles */
+.search-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; margin-bottom: 8px;
+  background: rgba(6, 14, 32, 0.5);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-left: 2px solid var(--accent); border-radius: 6px;
+}
+.search-row .role { color: var(--accent); flex: 1; }
+.mini-toggle { background: none; border: none; cursor: pointer; padding: 0; }
+.mini-switch {
+  width: 34px; height: 18px; border-radius: 999px; display: block;
+  background: var(--c-surface-high); position: relative; transition: background 0.2s;
+}
+.mini-toggle.on .mini-switch { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.mini-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 999px;
+  background: var(--c-outline); transition: transform 0.2s, background 0.2s;
+}
+.mini-toggle.on .mini-knob { transform: translateX(16px); background: var(--accent); }
 
 /* Settings: model pickers */
 .set-title {

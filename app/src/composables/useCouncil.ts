@@ -9,6 +9,11 @@ export type Stage = 'idle' | 'fanout' | 'review' | 'chairman' | 'done';
 export type Accent = 'red' | 'purple' | 'green' | 'gold' | 'blue';
 const FALLBACK_ACCENTS: Accent[] = ['red', 'purple', 'green', 'gold', 'blue'];
 
+export interface Source {
+  title: string;
+  uri: string;
+}
+
 export interface MemberState {
   id: number;
   name: string;
@@ -16,12 +21,14 @@ export interface MemberState {
   accent: Accent;
   icon: string;
   tagline: string;
+  searchEnabled: boolean;
   answer: string;
   status: SeatStatus;
   error: string | null;
   review: string;
   reviewStatus: SeatStatus | 'skipped';
   ranking: string[];
+  sources: Source[];
 }
 
 export interface TallyRow {
@@ -62,7 +69,11 @@ async function* parseSSE(body: ReadableStream<Uint8Array>) {
 
 export function useCouncil() {
   const members = reactive<MemberState[]>([]);
-  const chairman = reactive({ content: '', status: 'pending' as SeatStatus });
+  const chairman = reactive({
+    content: '',
+    status: 'pending' as SeatStatus,
+    sources: [] as Source[],
+  });
   const tally = ref<TallyRow[]>([]);
   const stage = ref<Stage>('idle');
   const running = ref(false);
@@ -77,6 +88,7 @@ export function useCouncil() {
     members.splice(0);
     chairman.content = '';
     chairman.status = 'pending';
+    chairman.sources = [];
     tally.value = [];
     fatal.value = null;
     stage.value = 'idle';
@@ -94,12 +106,14 @@ export function useCouncil() {
             accent: (m.accent as Accent) || FALLBACK_ACCENTS[i % FALLBACK_ACCENTS.length],
             icon: m.icon || 'forum',
             tagline: m.tagline || `Advisor ${m.label?.split(' ').pop() ?? ''}`,
+            searchEnabled: !!m.search,
             answer: '',
             status: 'pending',
             error: null,
             review: '',
             reviewStatus: data.peer_review ? 'pending' : 'skipped',
             ranking: [],
+            sources: [],
           });
         });
         break;
@@ -114,6 +128,9 @@ export function useCouncil() {
         break;
       case 'member_done':
         { const m = byId(data.id); if (m) { m.answer = data.content; m.status = 'done'; } }
+        break;
+      case 'member_sources':
+        { const m = byId(data.id); if (m) m.sources = data.sources || []; }
         break;
       case 'member_error':
         { const m = byId(data.id); if (m) { m.status = 'error'; m.error = data.error; } }
@@ -135,6 +152,9 @@ export function useCouncil() {
         break;
       case 'chairman_start':
         chairman.status = 'streaming';
+        break;
+      case 'chairman_sources':
+        chairman.sources = data.sources || [];
         break;
       case 'chairman_token':
         chairman.content += data.delta;
@@ -163,6 +183,8 @@ export function useCouncil() {
       councilModel?: string;
       reviewModel?: string;
       chairmanModel?: string;
+      searchOverrides?: Record<number, boolean>;
+      chairmanSearch?: boolean;
     } = {},
   ) {
     if (running.value) return;
@@ -180,6 +202,10 @@ export function useCouncil() {
           ...(opts.councilModel ? { council_model: opts.councilModel } : {}),
           ...(opts.reviewModel ? { review_model: opts.reviewModel } : {}),
           ...(opts.chairmanModel ? { chairman_model: opts.chairmanModel } : {}),
+          ...(opts.searchOverrides ? { search_overrides: opts.searchOverrides } : {}),
+          ...(typeof opts.chairmanSearch === 'boolean'
+            ? { chairman_search: opts.chairmanSearch }
+            : {}),
         }),
       });
       if (!res.ok || !res.body) {

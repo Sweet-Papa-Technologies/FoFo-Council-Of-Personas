@@ -21,6 +21,8 @@ export interface Persona {
   system_prompt: string;
   model?: string;
   temperature?: number;
+  // When true, this seat can run live Google Search grounding (Gemini native).
+  search?: boolean;
   // Optional UI hints (theming only — passed through to the browser):
   accent?: string; // 'red' | 'purple' | 'green' | 'gold' | 'blue' | hex
   icon?: string; // material icon name
@@ -35,6 +37,8 @@ export interface CouncilConfig {
     // Optional model override for the peer-review stage (the "fast" tier).
     // Falls back to each seat's own model when unset.
     review_model?: string;
+    // Default web-search state for seats that don't set `search` themselves.
+    web_search: boolean;
   };
   council: Persona[];
   chairman: Persona;
@@ -151,6 +155,7 @@ export function loadCouncilConfig(): CouncilConfig {
       council_temperature: settings.council_temperature ?? 0.9,
       chairman_temperature: settings.chairman_temperature ?? 0.3,
       review_model: settings.review_model,
+      web_search: settings.web_search ?? false,
     },
     council,
     chairman,

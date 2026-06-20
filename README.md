@@ -146,6 +146,22 @@ UI picks are saved in your browser and sent per-run; they never touch `council.y
 To change the defaults themselves, edit `council.yaml` (or `COUNCIL_MODEL`) — no code
 changes. A single seat can also pin its own `model:` to override the council default.
 
+### Web search (live grounding)
+
+Any seat can research with **live Google Search grounding** (Gemini-native), so its
+answer is backed by current facts instead of training-cutoff knowledge — and the web
+**sources it used are shown** under that advisor's card (and in the CLI/JSON output).
+Each advisor searches independently.
+
+- **Per seat in `council.yaml`:** add `search: true` to a persona (the Domain Expert
+  ships with it on). Set a global default with `settings.web_search: true`.
+- **Live in the UI:** Global Settings → **Web search** toggles each seat (and the
+  Chairman) per run; saved in your browser.
+- **CLI:** `--search` turns it on for every seat, `--no-search` forces it off.
+
+> Grounding uses Gemini's native API automatically when the endpoint is Gemini; on
+> other OpenAI-compatible providers seats fall back to ungrounded answers.
+
 Quick health check once the API is up:
 
 ```bash
@@ -223,6 +239,9 @@ npm run council -- "Should we migrate from Jest to Vitest?" --json
 
 # Faster: skip peer review
 npm run council -- "..." --no-review
+
+# Ground every seat with live web search (Gemini)
+npm run council -- "Best React state library right now?" --search
 ```
 
 Progress prints to **stderr**; the result prints to **stdout**, so it captures cleanly.

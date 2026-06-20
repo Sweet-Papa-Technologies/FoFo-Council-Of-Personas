@@ -13,6 +13,7 @@ interface ParsedArgs {
   json: boolean;
   quiet: boolean;
   review?: boolean; // undefined = use council.yaml default
+  search?: boolean; // undefined = use council.yaml default; true = all seats search
   help: boolean;
 }
 
@@ -24,6 +25,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a === '--quiet' || a === '-q') out.quiet = true;
     else if (a === '--no-review') out.review = false;
     else if (a === '--review') out.review = true;
+    else if (a === '--search') out.search = true;
+    else if (a === '--no-search') out.search = false;
     else if (a === '--help' || a === '-h') out.help = true;
     else qparts.push(a);
   }
@@ -37,11 +40,13 @@ Convene a council of adversarial personas (same model, different system prompts)
 that answer in parallel, peer-review each other, and a Chairman synthesizes.
 
 Usage:
-  npm run council -- "<question>" [--json] [--no-review] [--quiet]
+  npm run council -- "<question>" [--json] [--no-review] [--search] [--quiet]
 
 Options:
   --json        Emit structured JSON instead of Markdown
   --no-review   Skip the peer-review stage (faster)
+  --search      Enable live Google Search grounding for every seat (Gemini)
+  --no-search   Disable web search for this run
   --quiet       Suppress progress output on stderr
   -h, --help    Show this help
 
@@ -57,6 +62,7 @@ interface MemberAcc {
   error: string | null;
   review: string;
   ranking: string[];
+  sources: { title: string; uri: string }[];
 }
 
 interface TallyRow {
@@ -87,6 +93,7 @@ async function main(): Promise<void> {
   let tally: TallyRow[] = [];
   let fatal: string | null = null;
   let peerReview = true;
+  let chairmanSources: { title: string; uri: string }[] = [];
 
   const progress = (s: string) => {
     if (!args.quiet) process.stderr.write(s + '\n');
@@ -101,7 +108,7 @@ async function main(): Promise<void> {
           members.set(m.id, {
             id: m.id, name: m.name, label: m.label,
             accent: m.accent ?? '', tagline: m.tagline ?? '',
-            answer: '', error: null, review: '', ranking: [],
+            answer: '', error: null, review: '', ranking: [], sources: [],
           });
         }
         progress(`Council: ${(d.members as any[]).map((m) => m.name).join(', ')}` +
@@ -110,10 +117,16 @@ async function main(): Promise<void> {
       case 'stage':
         progress(`── stage: ${d.stage} ──`);
         break;
+      case 'member_sources': {
+        const m = members.get(d.id);
+        if (m) m.sources = d.sources || [];
+        break;
+      }
       case 'member_done': {
         const m = members.get(d.id);
         if (m) m.answer = d.content;
-        progress(`  ✓ ${m?.name ?? d.id} responded`);
+        progress(`  ✓ ${m?.name ?? d.id} responded` +
+          (m?.sources.length ? ` (${m.sources.length} sources)` : ''));
         break;
       }
       case 'member_error': {
@@ -130,6 +143,9 @@ async function main(): Promise<void> {
       case 'ranking_tally':
         tally = d.tally;
         break;
+      case 'chairman_sources':
+        chairmanSources = d.sources || [];
+        break;
       case 'chairman_done':
         chairman = d.content;
         progress('  ✓ Chairman synthesized');
@@ -145,7 +161,10 @@ async function main(): Promise<void> {
 
   const ac = new AbortController();
   try {
-    await runCouncil(args.question, emit, ac.signal, { peerReview: args.review });
+    const runOpts: { peerReview?: boolean; searchAll?: boolean } = {};
+    if (typeof args.review === 'boolean') runOpts.peerReview = args.review;
+    if (typeof args.search === 'boolean') runOpts.searchAll = args.search;
+    await runCouncil(args.question, emit, ac.signal, runOpts);
   } catch (err) {
     fatal = err instanceof Error ? err.message : String(err);
   }
@@ -167,11 +186,13 @@ async function main(): Promise<void> {
         status: m.error ? 'error' : 'ok',
         answer: m.answer, error: m.error,
         review: m.review || null, ranking: m.ranking,
+        sources: m.sources,
       })),
       rankings: tally.map((t, i) => ({
         rank: i + 1, name: t.name, label: t.label,
         points: t.points, appearances: t.appearances,
       })),
+      chairman_sources: chairmanSources,
     }, null, 2) + '\n');
     return;
   }
@@ -204,8 +225,17 @@ async function main(): Promise<void> {
     L.push(`<details><summary><strong>${head}</strong></summary>`);
     L.push('');
     L.push(m.error ? `> ⚠️ ${m.error}` : (m.answer || '_(no answer)_'));
+    if (m.sources.length) {
+      L.push('');
+      L.push(`**🔎 Sources:** ${m.sources.map((s) => `[${s.title}](${s.uri})`).join(' · ')}`);
+    }
     L.push('');
     L.push('</details>');
+    L.push('');
+  }
+
+  if (chairmanSources.length) {
+    L.push(`**🔎 Chairman sources:** ${chairmanSources.map((s) => `[${s.title}](${s.uri})`).join(' · ')}`);
     L.push('');
   }
 
