@@ -138,8 +138,13 @@ The council uses three Gemini tiers, matched to how hard each stage is:
 | Peer review | fast | `gemini-3.1-flash-lite` | `settings.review_model` in `council.yaml` |
 | Chairman | hard | `gemini-3.1-pro-preview` | `chairman.model` in `council.yaml` |
 
-Change any of them by editing `council.yaml` (or `COUNCIL_MODEL`) — no code changes.
-A single seat can also pin its own `model:` to override the council default.
+These are the **defaults**. You can also pick a model per role live in the UI —
+**Global Settings → Models** has a dropdown for each tier (populated from the
+provider's model list via `GET /api/models`), with **Reset to defaults** to revert.
+UI picks are saved in your browser and sent per-run; they never touch `council.yaml`.
+
+To change the defaults themselves, edit `council.yaml` (or `COUNCIL_MODEL`) — no code
+changes. A single seat can also pin its own `model:` to override the council default.
 
 Quick health check once the API is up:
 

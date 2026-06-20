@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   const ac = new AbortController();
   try {
-    await runCouncil(args.question, emit, ac.signal, args.review);
+    await runCouncil(args.question, emit, ac.signal, { peerReview: args.review });
   } catch (err) {
     fatal = err instanceof Error ? err.message : String(err);
   }

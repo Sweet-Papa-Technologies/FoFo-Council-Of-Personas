@@ -39,12 +39,10 @@
     <!-- ===== Top bar ===== -->
     <header class="topbar">
       <div class="topbar-left">
+        <q-icon name="groups" size="22px" class="brand-icon" />
         <span class="brand-tag label-caps">Council of Personas</span>
-        <nav class="tabs">
-          <button class="tab" :class="{ active: panel === null }" @click="goHome">Project View</button>
-          <button class="tab" :class="{ active: panel === 'settings' }" @click="openPanel('settings')">Metrics</button>
-          <button class="tab" :class="{ active: panel === 'history' }" @click="openPanel('history')">Archives</button>
-        </nav>
+        <span class="brand-divider"></span>
+        <span class="crumb font-mono">{{ panelCrumb }}</span>
       </div>
       <div class="topbar-right">
         <button
@@ -237,7 +235,7 @@
           </div>
         </template>
 
-        <!-- Global Settings / Metrics -->
+        <!-- Global Settings -->
         <template v-else-if="panel === 'settings'">
           <header class="panel-head">
             <span class="label-caps"><q-icon name="settings" size="18px" /> Global Settings</span>
@@ -245,15 +243,49 @@
           </header>
           <div class="panel-body">
             <div v-if="!config" class="panel-empty font-mono">Loading…</div>
-            <dl v-else class="settings-list font-mono">
-              <div><dt>Endpoint</dt><dd>{{ config.endpoint || '—' }}</dd></div>
-              <div><dt>Council model · medium</dt><dd>{{ config.default_model || '—' }}</dd></div>
-              <div><dt>Peer review · fast</dt><dd>{{ config.settings.review_model || config.default_model }}</dd></div>
-              <div><dt>Chairman · hard</dt><dd>{{ config.chairman.model || config.default_model }}</dd></div>
-              <div><dt>Peer review default</dt><dd>{{ config.settings.peer_review ? 'on' : 'off' }}</dd></div>
-              <div><dt>Council temperature</dt><dd>{{ config.settings.council_temperature }}</dd></div>
-              <div><dt>Chairman temperature</dt><dd>{{ config.settings.chairman_temperature }}</dd></div>
-            </dl>
+            <template v-else>
+              <div class="set-title label-caps">Models — what runs what</div>
+
+              <div
+                v-for="role in modelRoles"
+                :key="role.key"
+                class="model-pick"
+                :class="`accent-${role.accent}`"
+              >
+                <div class="pick-head">
+                  <span class="role label-caps">{{ role.label }}</span>
+                  <span class="pick-tier font-mono">{{ role.tier }}</span>
+                </div>
+                <div class="select-wrap">
+                  <select v-model="modelSel[role.key]" class="model-select font-mono">
+                    <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
+                  </select>
+                  <q-icon name="expand_more" size="18px" class="select-caret" />
+                </div>
+                <div class="pick-hint font-mono">
+                  <span v-if="modelSel[role.key] === defaultModels[role.key]">default</span>
+                  <span v-else class="overridden">overridden · default {{ defaultModels[role.key] }}</span>
+                </div>
+              </div>
+
+              <div class="set-actions">
+                <button class="reset-btn label-caps" :disabled="!modelsOverridden" @click="resetModels">
+                  <q-icon name="restart_alt" size="14px" /> Reset to defaults
+                </button>
+                <span class="set-applies font-mono">applies next run</span>
+              </div>
+              <p class="panel-note font-mono">
+                Defaults come from <code>council.yaml</code>; your picks are saved in this browser.
+              </p>
+
+              <div class="set-title label-caps">Environment</div>
+              <dl class="settings-list font-mono">
+                <div><dt>Endpoint</dt><dd>{{ config.endpoint || '—' }}</dd></div>
+                <div><dt>Peer review default</dt><dd>{{ config.settings.peer_review ? 'on' : 'off' }}</dd></div>
+                <div><dt>Council temp</dt><dd>{{ config.settings.council_temperature }}</dd></div>
+                <div><dt>Chairman temp</dt><dd>{{ config.settings.chairman_temperature }}</dd></div>
+              </dl>
+            </template>
           </div>
         </template>
       </div>
@@ -262,7 +294,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useCouncil, type MemberState, type Accent } from '@/composables/useCouncil';
 import { renderMarkdown } from '@/composables/markdown';
 
@@ -273,15 +305,6 @@ const {
 
 const question = ref('');
 const peerReviewOn = ref(true);
-const modelTag = ref('');
-
-onMounted(async () => {
-  await checkHealth();
-  try {
-    const j = await (await fetch('/api/health')).json();
-    if (j?.model) modelTag.value = j.model;
-  } catch { /* ignore */ }
-});
 
 // ---- Sidebar nav: slide-over panels --------------------------------------
 type Panel = 'history' | 'config' | 'settings';
@@ -289,6 +312,14 @@ const panel = ref<Panel | null>(null);
 const panelOpen = computed({
   get: () => panel.value !== null,
   set: (v: boolean) => { if (!v) panel.value = null; },
+});
+const panelCrumb = computed(() => {
+  switch (panel.value) {
+    case 'history': return 'Session History';
+    case 'config': return 'Council Config';
+    case 'settings': return 'Global Settings';
+    default: return 'Think Tank';
+  }
 });
 const config = ref<any>(null);
 
@@ -305,6 +336,67 @@ function openPanel(p: Panel) {
 function goHome() {
   panel.value = null;
 }
+
+// ---- Model selection (which model runs each role) ------------------------
+const LS_MODELS = 'cop.modelOverrides';
+const availableModels = ref<string[]>([]);
+const modelSel = reactive({ council: '', review: '', chairman: '' });
+const modelRoles = [
+  { key: 'council' as const, label: 'Council members', tier: 'medium', accent: 'green' },
+  { key: 'review' as const, label: 'Peer review', tier: 'fast', accent: 'purple' },
+  { key: 'chairman' as const, label: 'Chairman', tier: 'hard', accent: 'blue' },
+];
+
+const defaultModels = computed(() => ({
+  council: config.value?.default_model || '',
+  review: config.value?.settings?.review_model || config.value?.default_model || '',
+  chairman: config.value?.chairman?.model || config.value?.default_model || '',
+}));
+const modelOptions = computed(() => {
+  const set = new Set<string>(availableModels.value);
+  for (const v of [
+    modelSel.council, modelSel.review, modelSel.chairman,
+    defaultModels.value.council, defaultModels.value.review, defaultModels.value.chairman,
+  ]) { if (v) set.add(v); }
+  return [...set];
+});
+const modelsOverridden = computed(() =>
+  modelSel.council !== defaultModels.value.council ||
+  modelSel.review !== defaultModels.value.review ||
+  modelSel.chairman !== defaultModels.value.chairman,
+);
+const modelTag = computed(() => modelSel.council || config.value?.default_model || '');
+
+function resetModels() {
+  const d = defaultModels.value;
+  modelSel.council = d.council;
+  modelSel.review = d.review;
+  modelSel.chairman = d.chairman;
+  try { localStorage.removeItem(LS_MODELS); } catch { /* ignore */ }
+}
+watch(modelSel, () => {
+  try {
+    if (modelsOverridden.value) localStorage.setItem(LS_MODELS, JSON.stringify({ ...modelSel }));
+    else localStorage.removeItem(LS_MODELS);
+  } catch { /* ignore */ }
+}, { deep: true });
+
+onMounted(async () => {
+  void checkHealth();
+  try {
+    const saved = localStorage.getItem(LS_MODELS); // restore overrides across reloads
+    if (saved) Object.assign(modelSel, JSON.parse(saved));
+  } catch { /* ignore */ }
+  await ensureConfig();
+  const d = defaultModels.value; // fill any unset role with its default
+  if (!modelSel.council) modelSel.council = d.council;
+  if (!modelSel.review) modelSel.review = d.review;
+  if (!modelSel.chairman) modelSel.chairman = d.chairman;
+  try {
+    const j = await (await fetch('/api/models')).json();
+    if (Array.isArray(j.models)) availableModels.value = j.models.map((m: any) => m.id);
+  } catch { /* ignore */ }
+});
 
 // ---- Session history (in-memory, this session only) ----------------------
 interface HistEntry { id: number; question: string; chairman: string }
@@ -379,7 +471,16 @@ function submit() {
   if (q && !running.value) {
     lastAsked.value = q;
     panel.value = null; // return to the live view when a new run starts
-    void ask(q, { peerReview: peerReviewOn.value });
+    const opts: {
+      peerReview: boolean;
+      councilModel?: string;
+      reviewModel?: string;
+      chairmanModel?: string;
+    } = { peerReview: peerReviewOn.value };
+    if (modelSel.council) opts.councilModel = modelSel.council;
+    if (modelSel.review) opts.reviewModel = modelSel.review;
+    if (modelSel.chairman) opts.chairmanModel = modelSel.chairman;
+    void ask(q, opts);
   }
 }
 function newSession() {
@@ -463,15 +564,11 @@ function newSession() {
 }
 .topbar-left { display: flex; align-items: center; gap: 28px; }
 .brand-tag { color: var(--c-primary); letter-spacing: 0.12em; }
-.tabs { display: flex; gap: 20px; }
-.tab {
-  font-size: 14px; color: var(--c-on-surface-variant);
-  padding: 0 0 2px; cursor: pointer;
-  background: none; border: none; border-bottom: 2px solid transparent;
-  transition: color 0.15s;
+.brand-icon { color: var(--c-primary); }
+.brand-divider {
+  width: 1px; height: 18px; background: var(--c-outline-variant); margin: 0 4px;
 }
-.tab:hover { color: var(--c-primary); }
-.tab.active { color: var(--c-on-surface); font-weight: 700; border-bottom-color: var(--c-primary); }
+.crumb { font-size: 12px; color: var(--c-on-surface-variant); }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
 .pr-toggle {
   display: flex; align-items: center; gap: 8px;
@@ -685,6 +782,49 @@ function newSession() {
 .cfg-row .dot { margin-top: 5px; }
 .cfg-row .role { color: var(--accent); }
 .cfg-sub { font-size: 11px; color: var(--c-on-surface-variant); margin-top: 3px; }
+
+/* Settings: model pickers */
+.set-title {
+  color: var(--c-primary); margin: 4px 0 12px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--c-outline-variant);
+}
+.set-title:not(:first-child) { margin-top: 24px; }
+.model-pick {
+  padding: 12px 14px; margin-bottom: 10px;
+  background: rgba(6, 14, 32, 0.5);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-left: 2px solid var(--accent); border-radius: 6px;
+}
+.pick-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.pick-head .role { color: var(--accent); }
+.pick-tier { font-size: 10px; color: var(--c-on-surface-variant); text-transform: uppercase; letter-spacing: 0.06em; }
+.select-wrap { position: relative; }
+.model-select {
+  width: 100%; appearance: none; -webkit-appearance: none;
+  background: var(--c-surface-low); color: var(--c-on-surface);
+  border: 1px solid var(--c-outline-variant); border-radius: 6px;
+  padding: 9px 32px 9px 12px; font-size: 13px; cursor: pointer;
+  transition: border-color 0.15s;
+}
+.model-select:hover { border-color: var(--accent); }
+.model-select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.model-select option { background: var(--c-surface); color: var(--c-on-surface); }
+.select-caret {
+  position: absolute; right: 9px; top: 50%; transform: translateY(-50%);
+  color: var(--c-outline); pointer-events: none;
+}
+.pick-hint { font-size: 10px; color: var(--c-outline); margin-top: 6px; }
+.pick-hint .overridden { color: var(--accent); }
+.set-actions { display: flex; align-items: center; gap: 12px; margin: 14px 0 6px; }
+.reset-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--c-surface-high); color: var(--c-on-surface);
+  border: 1px solid var(--c-outline-variant); border-radius: 6px;
+  padding: 8px 12px; cursor: pointer; transition: border-color 0.15s, color 0.15s;
+}
+.reset-btn:hover:not(:disabled) { border-color: var(--c-primary); color: var(--c-primary); }
+.reset-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.set-applies { font-size: 10px; color: var(--c-outline); }
 
 /* Settings list */
 .settings-list { font-size: 13px; }

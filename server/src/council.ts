@@ -45,6 +45,7 @@ async function runSeat(
   id: number,
   label: string,
   question: string,
+  defaultModel: string,
   emit: Emit,
   signal: AbortSignal,
 ): Promise<SeatResult> {
@@ -54,7 +55,7 @@ async function runSeat(
     content = await streamChat(
       conn,
       {
-        model: persona.model ?? conn.model,
+        model: persona.model ?? defaultModel,
         system: persona.system_prompt,
         user: question,
         temperature: tempFor(persona, cfg.settings.council_temperature),
@@ -98,6 +99,7 @@ async function runReview(
   self: SeatResult,
   peers: SeatResult[], // successful seats OTHER than self
   question: string,
+  reviewModel: string,
   emit: Emit,
   signal: AbortSignal,
 ): Promise<string[] | null> {
@@ -123,8 +125,8 @@ async function runReview(
     const content = await streamChat(
       conn,
       {
-        // Peer review is the lightweight "fast" tier — use review_model if set.
-        model: cfg.settings.review_model ?? persona.model ?? conn.model,
+        // Peer review is the lightweight "fast" tier.
+        model: reviewModel,
         system: persona.system_prompt,
         user,
         temperature: tempFor(persona, cfg.settings.council_temperature),
@@ -177,6 +179,7 @@ async function runChairman(
   question: string,
   seats: SeatResult[],
   rankingSummary: string | null,
+  chairmanModel: string,
   emit: Emit,
   signal: AbortSignal,
 ): Promise<void> {
@@ -208,7 +211,7 @@ async function runChairman(
     const content = await streamChat(
       conn,
       {
-        model: cfg.chairman.model ?? conn.model,
+        model: chairmanModel,
         system: cfg.chairman.system_prompt,
         user,
         temperature:
@@ -226,15 +229,27 @@ async function runChairman(
 
 // ---- Top-level run -----------------------------------------------------------
 
+export interface RunOptions {
+  peerReview?: boolean;
+  councilModel?: string; // overrides default for council seats (medium tier)
+  reviewModel?: string; // overrides peer-review model (fast tier)
+  chairmanModel?: string; // overrides chairman model (hard tier)
+}
+
 export async function runCouncil(
   question: string,
   emit: Emit,
   signal: AbortSignal,
-  peerReviewOverride?: boolean,
+  opts: RunOptions = {},
 ): Promise<void> {
   const cfg = loadCouncilConfig();
   const conn = getConnection();
-  const peerReview = peerReviewOverride ?? cfg.settings.peer_review;
+  const peerReview = opts.peerReview ?? cfg.settings.peer_review;
+
+  // Effective model per role — UI override → council.yaml → connection default.
+  const councilModel = opts.councilModel || conn.model;
+  const reviewModel = opts.reviewModel || cfg.settings.review_model || councilModel;
+  const chairmanModel = opts.chairmanModel || cfg.chairman.model || conn.model;
 
   const roster = cfg.council.map((p, i) => ({
     persona: p,
@@ -259,7 +274,7 @@ export async function runCouncil(
   emit('stage', { stage: 'fanout' });
   const seats = await Promise.all(
     roster.map((r) =>
-      runSeat(conn, cfg, r.persona, r.id, r.label, question, emit, signal),
+      runSeat(conn, cfg, r.persona, r.id, r.label, question, councilModel, emit, signal),
     ),
   );
 
@@ -275,7 +290,7 @@ export async function runCouncil(
         const persona = roster[self.id].persona;
         const peers = succeeded.filter((p) => p.id !== self.id);
         const order = await runReview(
-          conn, cfg, persona, self, peers, question, emit, signal,
+          conn, cfg, persona, self, peers, question, reviewModel, emit, signal,
         );
         if (order && order.length) rankings.set(self.id, order);
       }),
@@ -295,7 +310,7 @@ export async function runCouncil(
 
   // Stage 3 — chairman synthesis.
   emit('stage', { stage: 'chairman' });
-  await runChairman(conn, cfg, question, seats, rankingSummary, emit, signal);
+  await runChairman(conn, cfg, question, seats, rankingSummary, chairmanModel, emit, signal);
 
   emit('done', {});
 }

@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
 import { getConnection, loadCouncilConfig } from './config';
 import { runCouncil, type Emit } from './council';
+import { listModels, type ModelInfo } from './llm';
 import { AsyncQueue } from './queue';
 
 const app = new Hono();
@@ -68,13 +69,36 @@ app.get('/api/config', (c) => {
   });
 });
 
+// Available models for the UI's model pickers. Cached for the process lifetime
+// (the model catalog rarely changes within a session).
+let modelsCache: ModelInfo[] | null = null;
+app.get('/api/models', async (c) => {
+  if (modelsCache) return c.json({ models: modelsCache });
+  try {
+    const conn = getConnection();
+    modelsCache = await listModels(conn);
+    return c.json({ models: modelsCache });
+  } catch (err) {
+    return c.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      503,
+    );
+  }
+});
+
 interface RunEvent {
   event: string;
   data: unknown;
 }
 
 app.post('/api/council/run', async (c) => {
-  let body: { question?: string; peer_review?: boolean };
+  let body: {
+    question?: string;
+    peer_review?: boolean;
+    council_model?: string;
+    review_model?: string;
+    chairman_model?: string;
+  };
   try {
     body = await c.req.json();
   } catch {
@@ -82,8 +106,12 @@ app.post('/api/council/run', async (c) => {
   }
   const question = (body.question ?? '').trim();
   if (!question) return c.json({ error: 'Missing "question".' }, 400);
-  const peerReviewOverride =
-    typeof body.peer_review === 'boolean' ? body.peer_review : undefined;
+  const runOpts = {
+    peerReview: typeof body.peer_review === 'boolean' ? body.peer_review : undefined,
+    councilModel: body.council_model || undefined,
+    reviewModel: body.review_model || undefined,
+    chairmanModel: body.chairman_model || undefined,
+  };
 
   // Fail fast with a normal HTTP error if config is broken, rather than opening
   // an SSE stream that immediately dies.
@@ -104,7 +132,7 @@ app.post('/api/council/run', async (c) => {
     const ac = new AbortController();
     stream.onAbort(() => ac.abort());
 
-    const run = runCouncil(question, emit, ac.signal, peerReviewOverride)
+    const run = runCouncil(question, emit, ac.signal, runOpts)
       .catch((err) => {
         emit('fatal', {
           error: err instanceof Error ? err.message : String(err),

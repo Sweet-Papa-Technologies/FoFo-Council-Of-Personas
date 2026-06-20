@@ -1,6 +1,59 @@
 // Minimal streaming client for an OpenAI-compatible chat-completions endpoint.
 import { chatCompletionsUrl, type Connection } from './config';
 
+export interface ModelInfo {
+  id: string;
+}
+
+function modelsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  if (/\/models$/.test(trimmed)) return trimmed;
+  if (/\/(v\d+\w*|openai)$/.test(trimmed)) return `${trimmed}/models`;
+  return `${trimmed}/v1/models`;
+}
+
+/**
+ * List chat-capable models from the provider. For the Gemini endpoint this uses
+ * the native models API and filters to text generation models; for any other
+ * OpenAI-compatible endpoint it uses GET /models. Errors propagate to the caller.
+ */
+export async function listModels(conn: Connection): Promise<ModelInfo[]> {
+  let host = '';
+  try { host = new URL(conn.baseUrl).host; } catch { /* keep empty */ }
+
+  if (host.includes('generativelanguage.googleapis.com')) {
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models` +
+      `?pageSize=1000&key=${encodeURIComponent(conn.apiKey)}`;
+    const res = await fetch(url);
+    const j = (await res.json()) as any;
+    if (!res.ok) throw new Error(`models HTTP ${res.status}`);
+    // Keep text chat models; drop image/audio/tts/embedding/etc.
+    const exclude = /(image|tts|audio|embedding|aqa|live|computer-use|vision|learnlm|gemma|nano-banana|robotics)/i;
+    const ids: string[] = (j.models || [])
+      .filter((m: any) => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map((m: any) => String(m.name || '').replace(/^models\//, ''))
+      .filter((id: string) => /^gemini-/.test(id) && !exclude.test(id));
+    return uniqSorted(ids).map((id) => ({ id }));
+  }
+
+  const res = await fetch(modelsUrl(conn.baseUrl), {
+    headers: { Authorization: `Bearer ${conn.apiKey}` },
+  });
+  const j = (await res.json()) as any;
+  if (!res.ok) throw new Error(`models HTTP ${res.status}`);
+  const ids: string[] = (j.data || j.models || [])
+    .map((m: any) => m.id ?? m.name)
+    .filter(Boolean);
+  return uniqSorted(ids).map((id) => ({ id }));
+}
+
+// Unique, with newer-looking names first (reverse-alpha puts gemini-3.x and the
+// *-latest aliases above gemini-2.x).
+function uniqSorted(ids: string[]): string[] {
+  return [...new Set(ids)].sort().reverse();
+}
+
 export interface ChatRequest {
   model: string;
   system: string;

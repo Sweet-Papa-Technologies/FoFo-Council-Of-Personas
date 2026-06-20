@@ -156,7 +156,15 @@ export function useCouncil() {
     }
   }
 
-  async function ask(question: string, opts: { peerReview?: boolean } = {}) {
+  async function ask(
+    question: string,
+    opts: {
+      peerReview?: boolean;
+      councilModel?: string;
+      reviewModel?: string;
+      chairmanModel?: string;
+    } = {},
+  ) {
     if (running.value) return;
     reset();
     running.value = true;
@@ -169,6 +177,9 @@ export function useCouncil() {
           ...(typeof opts.peerReview === 'boolean'
             ? { peer_review: opts.peerReview }
             : {}),
+          ...(opts.councilModel ? { council_model: opts.councilModel } : {}),
+          ...(opts.reviewModel ? { review_model: opts.reviewModel } : {}),
+          ...(opts.chairmanModel ? { chairman_model: opts.chairmanModel } : {}),
         }),
       });
       if (!res.ok || !res.body) {
