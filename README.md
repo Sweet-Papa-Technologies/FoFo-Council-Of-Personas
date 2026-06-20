@@ -1,4 +1,25 @@
-# Council of Personas
+<div align="center">
+
+<img src="assets/banner.png" alt="Council of Personas — one question, many minds, one synthesis" width="100%" />
+
+<p>
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#use-it-as-a-claude-skill-headless-no-web-ui"><b>Claude Skill</b></a> ·
+  <a href="#configuration--env-vars"><b>Config</b></a> ·
+  <a href="#editing-the-council-councilyaml"><b>Personas</b></a> ·
+  <a href="docs/BRANDING.md"><b>Branding</b></a>
+</p>
+
+<p>
+  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-bcc3ff?style=flat-square" />
+  <img alt="Node ≥ 22" src="https://img.shields.io/badge/node-%E2%89%A5%2022-2e3a8c?style=flat-square" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-bcc3ff?style=flat-square" />
+  <img alt="Backend: Hono" src="https://img.shields.io/badge/api-Hono-7c3aed?style=flat-square" />
+  <img alt="Frontend: Quasar" src="https://img.shields.io/badge/ui-Quasar%20%C2%B7%20Vue%203-57e0a8?style=flat-square" />
+  <img alt="Models: Gemini" src="https://img.shields.io/badge/models-Gemini-ffd479?style=flat-square" />
+</p>
+
+</div>
 
 Ask one question. A **council of advisors** — all the *same* underlying model, each
 with a different system prompt — answer **in parallel**, **critique and rank** each
@@ -18,10 +39,16 @@ pragmatist, a domain expert) run hot (temp ~0.9) so they disagree, then a cold
 └──────────────────────────────────────────────────────────┘
 ```
 
+<div align="center">
+  <img src="assets/screenshot.png" alt="Council of Personas — the command-station UI: pinned Chairman synthesis above a grid of adversarial persona cards" width="100%" />
+</div>
+
 - **Backend** — Node + TypeScript + [Hono](https://hono.dev), streaming over SSE.
   Model calls hit any **OpenAI-compatible** `chat/completions` endpoint.
 - **Frontend** — the Quasar (Vue 3) SPA in `app/`, a dark "command station" UI.
 - **Config-driven** — edit `council.yaml` to change the roster. No code changes.
+- **Two front-ends, one engine** — the same council runs as a [headless CLI / Claude
+  skill](#use-it-as-a-claude-skill-headless-no-web-ui), no browser required.
 
 > **Do I need a LiteLLM proxy? No.** The app talks to any OpenAI-compatible endpoint.
 > The simplest setup is a **free Gemini API key** and nothing else — the app defaults
@@ -175,14 +202,55 @@ The `chairman:` block has the same shape as a seat and supports the same `model`
 
 ---
 
+## Use it as a Claude Skill (headless, no web UI)
+
+The same council runs headless from the command line and as a **Claude Code skill** —
+so Claude (or any agent) can consult the council and get the synthesis back as text it
+can show or act on, without opening the browser. Because the council runs on **Gemini**,
+it's a genuine second opinion distinct from Claude.
+
+```bash
+# Markdown report (Chairman synthesis + ranking + collapsible per-persona answers)
+npm run council -- "Should we migrate from Jest to Vitest?"
+
+# Structured JSON for programmatic use
+npm run council -- "Should we migrate from Jest to Vitest?" --json
+
+# Faster: skip peer review
+npm run council -- "..." --no-review
+```
+
+Progress prints to **stderr**; the result prints to **stdout**, so it captures cleanly.
+
+### Installing the skill
+
+- **In this repo** — the skill at `.claude/skills/council-of-personas/` works whenever
+  you run Claude Code from the project root. Nothing to install.
+- **Everywhere** — make it available in every session, from any directory:
+
+  ```bash
+  npm run skill:install      # copies a path-resolved copy to ~/.claude/skills
+  ```
+
+Then start a new session and say *"convene the council on &lt;X&gt;"* / *"get me a panel of
+perspectives on &lt;X&gt;"* / *"red-team this plan: &lt;X&gt;"*. Claude runs the CLI, then leads
+with the Chairman's recommendation and offers the individual advisors' arguments.
+
+> The skill reads the same key (Keychain/`.env`) and `council.yaml` as everything else.
+
+---
+
 ## Layout
 
 ```
 council.yaml          the roster (edit me)
 .env.example          env template
+.claude/skills/council-of-personas/SKILL.md   Claude Code skill (headless)
 scripts/secrets.ts    Keychain CLI (set/show/clear)
+scripts/install-skill.sh   install the skill into ~/.claude/skills
 server/src/
   index.ts            Hono server + SSE endpoint
+  cli.ts              headless CLI (Markdown / JSON) — used by the skill
   council.ts          3-stage orchestration
   llm.ts              streaming OpenAI-compatible client
   config.ts           env/Keychain + council.yaml loading
@@ -210,3 +278,17 @@ accent colors and live status glows.
   synthesizes from the seats that answered.
 - **No tokens appear** — confirm the API is up (`curl localhost:8787/api/health`) and
   that the Quasar dev server is proxying `/api` (it does by default via `quasar.config.ts`).
+
+---
+
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The golden rule: keep it
+config-driven (roster/models in `council.yaml`, secrets in the Keychain/`.env`) and make
+both typechecks pass.
+
+## License
+
+[MIT](LICENSE) © Forrester Terry. Brand assets generated with Google's Nano Banana Pro;
+see [docs/BRANDING.md](docs/BRANDING.md).
+

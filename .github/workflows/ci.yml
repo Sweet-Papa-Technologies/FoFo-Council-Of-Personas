@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Backend (npm)
+      - name: Install backend deps
+        run: npm install
+      - name: Typecheck server
+        run: npm run typecheck
+
+      # Frontend (pnpm)
+      - name: Enable pnpm
+        run: corepack enable
+      - name: Install app deps
+        run: pnpm --dir app install --no-frozen-lockfile
+      - name: Typecheck app
+        run: pnpm --dir app run typecheck
