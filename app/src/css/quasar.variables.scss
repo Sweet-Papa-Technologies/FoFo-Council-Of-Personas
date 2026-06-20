@@ -1,0 +1,26 @@
+// Quasar Sass (& SCSS) Variables
+// --------------------------------------------------
+// To customize the look and feel of this app, you can override
+// the Sass/SCSS variables found in Quasar's source Sass/SCSS files.
+
+// Check documentation for full list of Quasar variables
+
+// Your own variables (that are declared here) and Quasar's own
+// ones will be available out of the box in your .vue/.scss/.sass files
+
+// It's highly recommended to change the default colors
+// to match your app's branding.
+// Tip: Use the "Theme Builder" on Quasar's documentation website.
+
+// Council of Personas — "Strategic Command Interface" dark theme
+$primary   : #bcc3ff; // Council Blue (light tint)
+$secondary : #d2bbff; // Visionary Purple
+$accent    : #7c3aed;
+
+$dark      : #171f33; // surface-container (q-card etc. in dark mode)
+$dark-page : #0b1326; // background
+
+$positive  : #36e0a6;
+$negative  : #ff6b6b;
+$info      : #bcc3ff;
+$warning   : #f5b94a;

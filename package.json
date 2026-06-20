@@ -1,0 +1,29 @@
+{
+  "name": "council-of-personas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Council of Personas — one question, many adversarial advisors (same model, different system prompts), synthesized by a Chairman. Backend API + Quasar SPA.",
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "tsx watch server/src/index.ts",
+    "dev:web": "npm --prefix app run dev",
+    "start": "tsx server/src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "secrets:set": "tsx scripts/secrets.ts set",
+    "secrets:show": "tsx scripts/secrets.ts show",
+    "secrets:clear": "tsx scripts/secrets.ts clear"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "dotenv": "^16.4.7",
+    "hono": "^4.6.14",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
