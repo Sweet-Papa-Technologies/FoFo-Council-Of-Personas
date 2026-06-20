@@ -12,10 +12,19 @@
       </button>
 
       <nav class="nav">
-        <div class="nav-item active label-caps"><q-icon name="psychology" size="20px" /> Think Tank</div>
-        <div class="nav-item label-caps"><q-icon name="history" size="20px" /> Session History</div>
-        <div class="nav-item label-caps"><q-icon name="settings_ethernet" size="20px" /> YAML Config</div>
-        <div class="nav-item label-caps"><q-icon name="settings" size="20px" /> Global Settings</div>
+        <button class="nav-item label-caps" :class="{ active: panel === null }" @click="goHome">
+          <q-icon name="psychology" size="20px" /> Think Tank
+        </button>
+        <button class="nav-item label-caps" :class="{ active: panel === 'history' }" @click="openPanel('history')">
+          <q-icon name="history" size="20px" /> Session History
+          <span v-if="history.length" class="nav-badge">{{ history.length }}</span>
+        </button>
+        <button class="nav-item label-caps" :class="{ active: panel === 'config' }" @click="openPanel('config')">
+          <q-icon name="settings_ethernet" size="20px" /> YAML Config
+        </button>
+        <button class="nav-item label-caps" :class="{ active: panel === 'settings' }" @click="openPanel('settings')">
+          <q-icon name="settings" size="20px" /> Global Settings
+        </button>
       </nav>
 
       <div class="sys-status">
@@ -32,9 +41,9 @@
       <div class="topbar-left">
         <span class="brand-tag label-caps">Council of Personas</span>
         <nav class="tabs">
-          <span class="tab active">Project View</span>
-          <span class="tab">Metrics</span>
-          <span class="tab">Archives</span>
+          <button class="tab" :class="{ active: panel === null }" @click="goHome">Project View</button>
+          <button class="tab" :class="{ active: panel === 'settings' }" @click="openPanel('settings')">Metrics</button>
+          <button class="tab" :class="{ active: panel === 'history' }" @click="openPanel('history')">Archives</button>
         </nav>
       </div>
       <div class="topbar-right">
@@ -164,11 +173,96 @@
         <div class="stage-spacer"></div>
       </div>
     </main>
+
+    <!-- ===== Slide-over panels (sidebar nav targets) ===== -->
+    <q-dialog v-model="panelOpen" position="right" seamless>
+      <div class="panel glass-panel">
+        <!-- Session History / Archives -->
+        <template v-if="panel === 'history'">
+          <header class="panel-head">
+            <span class="label-caps"><q-icon name="history" size="18px" /> Session History</span>
+            <q-btn flat dense round icon="close" v-close-popup />
+          </header>
+          <div class="panel-body">
+            <div v-if="!history.length" class="panel-empty font-mono">
+              No runs yet this session. Convene the council and they'll appear here.
+            </div>
+            <div v-for="h in history" :key="h.id" class="hist-item">
+              <button class="hist-q label-caps" @click="toggleHist(h.id)">
+                <q-icon :name="expandedHist === h.id ? 'expand_less' : 'expand_more'" size="16px" />
+                <span>{{ h.question }}</span>
+              </button>
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-if="expandedHist === h.id" class="hist-synth synthesis" v-html="renderMarkdown(h.chairman)"></div>
+            </div>
+          </div>
+        </template>
+
+        <!-- YAML Config -->
+        <template v-else-if="panel === 'config'">
+          <header class="panel-head">
+            <span class="label-caps"><q-icon name="settings_ethernet" size="18px" /> Council Config</span>
+            <q-btn flat dense round icon="close" v-close-popup />
+          </header>
+          <div class="panel-body">
+            <div v-if="!config" class="panel-empty font-mono">Loading…</div>
+            <template v-else>
+              <p class="panel-note font-mono">
+                Read-only. Edit <code>council.yaml</code> and re-ask — changes apply with no restart.
+              </p>
+              <div
+                v-for="p in config.council"
+                :key="p.name"
+                class="cfg-row"
+                :class="`accent-${p.accent || 'blue'}`"
+              >
+                <span class="dot solid"></span>
+                <div class="cfg-main">
+                  <div class="role label-caps">{{ p.name }}</div>
+                  <div class="cfg-sub font-mono">
+                    {{ p.tagline || '—' }} · {{ p.model || config.default_model }}<span v-if="p.temperature != null"> · temp {{ p.temperature }}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="cfg-row accent-blue">
+                <span class="dot solid"></span>
+                <div class="cfg-main">
+                  <div class="role label-caps">{{ config.chairman.name }}</div>
+                  <div class="cfg-sub font-mono">
+                    Chairman · {{ config.chairman.model || config.default_model }}<span v-if="config.chairman.temperature != null"> · temp {{ config.chairman.temperature }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Global Settings / Metrics -->
+        <template v-else-if="panel === 'settings'">
+          <header class="panel-head">
+            <span class="label-caps"><q-icon name="settings" size="18px" /> Global Settings</span>
+            <q-btn flat dense round icon="close" v-close-popup />
+          </header>
+          <div class="panel-body">
+            <div v-if="!config" class="panel-empty font-mono">Loading…</div>
+            <dl v-else class="settings-list font-mono">
+              <div><dt>Endpoint</dt><dd>{{ config.endpoint || '—' }}</dd></div>
+              <div><dt>Council model · medium</dt><dd>{{ config.default_model || '—' }}</dd></div>
+              <div><dt>Peer review · fast</dt><dd>{{ config.settings.review_model || config.default_model }}</dd></div>
+              <div><dt>Chairman · hard</dt><dd>{{ config.chairman.model || config.default_model }}</dd></div>
+              <div><dt>Peer review default</dt><dd>{{ config.settings.peer_review ? 'on' : 'off' }}</dd></div>
+              <div><dt>Council temperature</dt><dd>{{ config.settings.council_temperature }}</dd></div>
+              <div><dt>Chairman temperature</dt><dd>{{ config.settings.chairman_temperature }}</dd></div>
+            </dl>
+          </div>
+        </template>
+      </div>
+    </q-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useCouncil, type MemberState, type Accent } from '@/composables/useCouncil';
 import { renderMarkdown } from '@/composables/markdown';
 
@@ -188,6 +282,46 @@ onMounted(async () => {
     if (j?.model) modelTag.value = j.model;
   } catch { /* ignore */ }
 });
+
+// ---- Sidebar nav: slide-over panels --------------------------------------
+type Panel = 'history' | 'config' | 'settings';
+const panel = ref<Panel | null>(null);
+const panelOpen = computed({
+  get: () => panel.value !== null,
+  set: (v: boolean) => { if (!v) panel.value = null; },
+});
+const config = ref<any>(null);
+
+async function ensureConfig() {
+  if (config.value) return;
+  try {
+    config.value = await (await fetch('/api/config')).json();
+  } catch { /* leave null → shows Loading… */ }
+}
+function openPanel(p: Panel) {
+  panel.value = p;
+  if (p === 'config' || p === 'settings') void ensureConfig();
+}
+function goHome() {
+  panel.value = null;
+}
+
+// ---- Session history (in-memory, this session only) ----------------------
+interface HistEntry { id: number; question: string; chairman: string }
+const history = ref<HistEntry[]>([]);
+const expandedHist = ref<number | null>(null);
+const lastAsked = ref('');
+let histSeq = 0;
+
+watch(running, (now, prev) => {
+  // A run just finished — snapshot it for the history panel.
+  if (prev && !now && chairman.content && lastAsked.value) {
+    history.value.unshift({ id: ++histSeq, question: lastAsked.value, chairman: chairman.content });
+  }
+});
+function toggleHist(id: number) {
+  expandedHist.value = expandedHist.value === id ? null : id;
+}
 
 const hasRun = computed(() => members.length > 0 || !!chairman.content);
 const respondedCount = computed(() => members.filter((m) => m.status === 'done').length);
@@ -242,7 +376,11 @@ function awaitingText(m: MemberState): string {
 
 function submit() {
   const q = question.value.trim();
-  if (q && !running.value) void ask(q, { peerReview: peerReviewOn.value });
+  if (q && !running.value) {
+    lastAsked.value = q;
+    panel.value = null; // return to the live view when a new run starts
+    void ask(q, { peerReview: peerReviewOn.value });
+  }
 }
 function newSession() {
   if (running.value) return;
@@ -286,13 +424,22 @@ function newSession() {
 .nav { display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .nav-item {
   display: flex; align-items: center; gap: 12px;
+  width: 100%; text-align: left;
   padding: 11px; border-radius: 6px;
-  color: var(--c-on-surface-variant); cursor: default;
+  background: none; border: none; border-right: 2px solid transparent;
+  color: var(--c-on-surface-variant); cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
+.nav-item:hover { background: var(--c-surface-high); color: var(--c-on-surface); }
 .nav-item.active {
   color: var(--c-primary);
   background: rgba(34, 42, 61, 0.5);
-  border-right: 2px solid var(--c-primary);
+  border-right-color: var(--c-primary);
+}
+.nav-badge {
+  margin-left: auto; font-family: var(--font-mono); font-size: 10px;
+  background: var(--c-primary-container); color: var(--c-primary);
+  border-radius: 999px; padding: 1px 7px;
 }
 .sys-status {
   display: flex; justify-content: space-between; align-items: center;
@@ -317,8 +464,14 @@ function newSession() {
 .topbar-left { display: flex; align-items: center; gap: 28px; }
 .brand-tag { color: var(--c-primary); letter-spacing: 0.12em; }
 .tabs { display: flex; gap: 20px; }
-.tab { font-size: 14px; color: var(--c-on-surface-variant); padding-bottom: 2px; cursor: default; }
-.tab.active { color: var(--c-on-surface); font-weight: 700; border-bottom: 2px solid var(--c-primary); }
+.tab {
+  font-size: 14px; color: var(--c-on-surface-variant);
+  padding: 0 0 2px; cursor: pointer;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  transition: color 0.15s;
+}
+.tab:hover { color: var(--c-primary); }
+.tab.active { color: var(--c-on-surface); font-weight: 700; border-bottom-color: var(--c-primary); }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
 .pr-toggle {
   display: flex; align-items: center; gap: 8px;
@@ -499,6 +652,58 @@ function newSession() {
 .dot.blue { background: var(--c-primary); }
 .dot.pulse { background: var(--accent, var(--c-primary)); box-shadow: 0 0 8px var(--accent, var(--c-primary)); animation: dotpulse 1.2s ease-in-out infinite; }
 @keyframes dotpulse { 50% { opacity: 0.35; } }
+
+/* Slide-over panels */
+.panel {
+  width: 460px; max-width: 92vw; height: 100vh;
+  display: flex; flex-direction: column;
+  background: var(--c-surface-low);
+  border-left: 1px solid var(--c-outline-variant);
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 20px; border-bottom: 1px solid var(--c-outline-variant);
+  color: var(--c-primary);
+}
+.panel-head .label-caps { display: flex; align-items: center; gap: 8px; }
+.panel-body { padding: 18px 20px; overflow-y: auto; }
+.panel-empty { color: var(--c-outline); font-size: 13px; line-height: 1.6; }
+.panel-note {
+  font-size: 11px; color: var(--c-on-surface-variant);
+  margin: 0 0 14px; line-height: 1.5;
+}
+.panel-note code { background: var(--c-surface-high); padding: 1px 5px; border-radius: 4px; }
+
+/* Config rows */
+.cfg-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; margin-bottom: 8px;
+  background: rgba(6, 14, 32, 0.5);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-left: 2px solid var(--accent); border-radius: 6px;
+}
+.cfg-row .dot { margin-top: 5px; }
+.cfg-row .role { color: var(--accent); }
+.cfg-sub { font-size: 11px; color: var(--c-on-surface-variant); margin-top: 3px; }
+
+/* Settings list */
+.settings-list { font-size: 13px; }
+.settings-list > div {
+  display: flex; justify-content: space-between; gap: 16px;
+  padding: 10px 0; border-bottom: 1px solid rgba(69, 70, 81, 0.3);
+}
+.settings-list dt { color: var(--c-on-surface-variant); }
+.settings-list dd { margin: 0; color: var(--c-on-surface); text-align: right; }
+
+/* History */
+.hist-item { border-bottom: 1px solid rgba(69, 70, 81, 0.3); padding: 4px 0; }
+.hist-q {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: none; border: none; cursor: pointer;
+  color: var(--c-on-surface); padding: 10px 0; font-size: 12px;
+}
+.hist-q:hover { color: var(--c-primary); }
+.hist-synth { font-size: 13px; padding: 4px 0 14px; }
 
 /* Responsive */
 @media (max-width: 950px) {

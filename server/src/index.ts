@@ -31,6 +31,43 @@ app.get('/api/health', (c) => {
   }
 });
 
+// Roster + settings for the UI's Config/Settings panels. No secrets — the API
+// key is never returned, only the endpoint host.
+app.get('/api/config', (c) => {
+  let cfg;
+  try {
+    cfg = loadCouncilConfig();
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 503);
+  }
+  let endpoint: string | null = null;
+  let defaultModel: string | null = null;
+  try {
+    const conn = getConnection();
+    defaultModel = conn.model;
+    try { endpoint = new URL(conn.baseUrl).host; } catch { endpoint = conn.baseUrl; }
+  } catch {
+    /* no key configured — still show the roster */
+  }
+  return c.json({
+    endpoint,
+    default_model: defaultModel,
+    settings: cfg.settings,
+    council: cfg.council.map((p) => ({
+      name: p.name,
+      tagline: p.tagline ?? null,
+      accent: p.accent ?? null,
+      model: p.model ?? null,
+      temperature: p.temperature ?? null,
+    })),
+    chairman: {
+      name: cfg.chairman.name,
+      model: cfg.chairman.model ?? null,
+      temperature: cfg.chairman.temperature ?? null,
+    },
+  });
+});
+
 interface RunEvent {
   event: string;
   data: unknown;
