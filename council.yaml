@@ -52,6 +52,10 @@ council:
     accent: red
     icon: warning
     tagline: The Skeptic
+    # Spec wanted this seat on Claude (a clean, different-lineage arguer). Claude on
+    # Vertex is enabled but its global base-model quota is currently 0 (429), so this
+    # seat stays on Gemini until that quota lands. To flip it on once quota is granted:
+    #   model: "vertex:anthropic:claude-sonnet-4-6"
     system_prompt: |
       You are the RED TEAM on an advisory council. Your job is to attack, not to agree.
       Assume the question hides a bad idea until proven otherwise.
@@ -99,8 +103,12 @@ council:
     accent: gold
     icon: science
     tagline: Technical Authority
-    # The expert benefits most from current facts → web search on by default.
-    search: true
+    # MODEL VARIANCE: this seat runs on a DIFFERENT lineage (DeepSeek V3.2 via
+    # Vertex MaaS) so "agreement" with the Gemini seats means something — it isn't
+    # one base model echoing itself. Grounding for non-Gemini seats comes from the
+    # `research` flag (Tavily), which works for every lineage. See the lineage menu
+    # at the bottom of this file to reassign any seat.
+    model: "vertex:openai:deepseek-ai/deepseek-v3.2-maas"
     system_prompt: |
       You are the DOMAIN EXPERT on an advisory council. You are rigorous and precise.
       - Reason from first principles and underlying mechanisms, not analogies or vibes.
@@ -145,6 +153,10 @@ devils_advocate:
 chairman:
   name: "Chairman"
   # Hardest job on the council — reconcile everything → run on the "hard" tier.
+  # SPEC NOTE: diversifying the SYNTHESIS layer off Gemini is the highest-value
+  # variance move (run-1's hallucination happened here). Target is Claude, but its
+  # Vertex global quota is 0 right now, so the Chairman stays on Gemini Pro. Flip to
+  # Claude once quota lands:  model: "vertex:anthropic:claude-opus-4-6"
   model: gemini-3.1-pro-preview
   system_prompt: |
     You are the CHAIRMAN of an advisory council. You did not answer the question
@@ -173,3 +185,32 @@ chairman:
     - If peer rankings are provided, weigh them but do not defer to them blindly — a
       well-ranked answer can still be wrong.
     Be concise and well-structured.
+
+# ============================================================================
+#  MODEL LINEAGE MENU — set any seat's `model:` to one of these to mix lineages.
+#  The whole point (field-test P0-2): when seats share ONE base model, a
+#  "unanimous" verdict is partly substrate echo. Different lineages make
+#  agreement mean something. Non-Gemini seats are grounded via the `research`
+#  flag (Tavily), since they lack native search.
+#
+#  Plain Gemini ids (default connection) — no prefix:
+#    gemini-3.5-flash · gemini-3.1-pro-preview · gemini-3.1-flash-lite
+#
+#  Vertex AI (direct, no proxy; ADC auth; server/src/vertex.ts). Two schemes:
+#    vertex:anthropic:<id>   → Anthropic Messages API (Claude)
+#    vertex:openai:<id>      → Vertex MaaS, OpenAI-compatible (everything else)
+#
+#  VERIFIED LIVE on this project (us project, `global` endpoint), 2026-06-21:
+#    vertex:openai:deepseek-ai/deepseek-v3.2-maas          # DeepSeek (in use: Domain Expert)
+#    vertex:openai:qwen/qwen3-235b-a22b-instruct-2507-maas # Qwen 3 (Alibaba lineage)
+#    vertex:openai:qwen/qwen3-next-80b-a3b-instruct-maas   # Qwen 3 (smaller/faster)
+#    vertex:openai:openai/gpt-oss-120b-maas                # OpenAI open-weights lineage
+#
+#  ENABLED but BLOCKED on quota (global base-model quota = 0 → 429; request an
+#  increase, then these work with no code change):
+#    vertex:anthropic:claude-sonnet-4-6 · vertex:anthropic:claude-opus-4-6
+#
+#  Listed in Model Garden but NOT callable here yet (need a specific region or
+#  enablement): meta/llama-4-maverick-...-maas, mistralai/mistral-*. Discover
+#  current ids:  gcloud ai model-garden models list --model-filter=<publisher>
+# ============================================================================

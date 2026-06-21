@@ -1,5 +1,6 @@
 // Minimal streaming client for an OpenAI-compatible chat-completions endpoint.
 import { chatCompletionsUrl, type Connection } from './config';
+import { parseVertexModel, streamVertex } from './vertex';
 
 export interface ModelInfo {
   id: string;
@@ -100,6 +101,11 @@ export async function streamChat(
   req: ChatRequest,
   onDelta: (delta: string) => void,
 ): Promise<ChatResult> {
+  // A seat can opt into a non-Gemini lineage on Vertex via its model string
+  // (vertex:anthropic:… / vertex:openai:…), independent of the base connection.
+  const vx = parseVertexModel(req.model);
+  if (vx) return streamVertex(vx.kind, vx.id, req, onDelta);
+
   const hasAttachments = !!req.attachments?.length;
   // Gemini's native API handles grounding AND multimodal (images/PDF) cleanly,
   // so route there when either is in play.
