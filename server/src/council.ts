@@ -206,6 +206,42 @@ function tallyRankings(
     .sort((a, b) => b.points - a.points);
 }
 
+// ---- Research: distill the question into a focused web-search query ----------
+
+async function deriveSearchQuery(
+  conn: ReturnType<typeof getConnection>,
+  question: string,
+  model: string,
+  emit: Emit,
+  signal: AbortSignal,
+): Promise<string> {
+  // Fallback if the model call fails: a whitespace-collapsed, length-capped slice
+  // of the question (ResearchSession also caps to Tavily's 400-char limit).
+  const fallback = question.replace(/\s+/g, ' ').trim().slice(0, 380);
+  try {
+    const { text } = await streamChat(
+      conn,
+      {
+        model,
+        system:
+          'You convert a user question into ONE focused web-search query that would surface the ' +
+          'most relevant current facts. Reply with ONLY the query text — no quotes, no label, no ' +
+          'explanation, max ~15 words.',
+        user: question,
+        temperature: 0.2,
+        signal,
+      },
+      () => {},
+    );
+    const q = text.replace(/\s+/g, ' ').trim().replace(/^["']+|["']+$/g, '');
+    const finalQuery = q || fallback;
+    emit('research_query', { query: finalQuery });
+    return finalQuery;
+  } catch {
+    return fallback; // soft — never let query-gen abort grounding
+  }
+}
+
 // ---- Stage 2.5: standing Devil's Advocate (anti-framing guard) ---------------
 
 const DEFAULT_DEVILS_ADVOCATE: Persona = {
@@ -389,33 +425,33 @@ export async function runCouncil(
     : question;
 
   // Provider-agnostic grounding: one shared research brief for every role, so
-  // non-Gemini seats and the Chairman ground from the same evidence. When research
-  // is EXPLICITLY requested for the run, a missing/invalid key or a failed search
-  // is a HARD ERROR (never a silent no-op) — "grounded" must mean grounded. A
-  // config-default enable degrades soft.
-  const researchExplicit = opts.research === true;
+  // non-Gemini seats and the Chairman ground from the same evidence. Research is
+  // best-effort — it NEVER aborts the council. A missing key, a failed search, or
+  // no results just means the run proceeds ungrounded; the outcome is surfaced
+  // (research_done / research_error / research_skipped) so callers can see it.
   const researchEnabled = opts.research ?? cfg.settings.research;
   let briefText = '';
   let briefSources: GroundingSource[] = [];
   if (researchEnabled) {
     const session = new ResearchSession();
     if (!session.enabled) {
-      const msg = 'research was requested but no Tavily API key is configured (set TAVILY_API_KEY or the tavily-spt-dev Keychain entry).';
-      emit('research_skipped', { reason: msg });
-      if (researchExplicit) throw new Error(msg);
+      emit('research_skipped', { reason: 'no Tavily API key configured' });
     } else {
       emit('stage', { stage: 'research' });
-      const brief = await session.brief(question, signal);
+      // Let the model distill the (possibly long, multi-paragraph) question into a
+      // focused search query — far better grounding than dumping the prompt verbatim,
+      // and it sidesteps Tavily's 400-char query cap.
+      const searchQuery = await deriveSearchQuery(conn, question, reviewModel, emit, signal);
+      const brief = await session.brief(searchQuery, signal);
       if (brief && brief.sources.length) {
         briefText = brief.text;
         briefSources = brief.sources;
-        emit('research_done', { sources: briefSources });
+        emit('research_done', { query: searchQuery, sources: briefSources });
       } else {
         const reason = session.lastError
           ? `Tavily search failed: ${session.lastError}`
           : 'Tavily returned no results for this query.';
-        emit('research_error', { reason });
-        if (researchExplicit && session.lastError) throw new Error(`research: ${reason}`);
+        emit('research_error', { reason }); // soft — run continues ungrounded
       }
     }
   }

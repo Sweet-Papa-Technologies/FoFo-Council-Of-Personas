@@ -12,6 +12,17 @@ import { keychainGet } from './secrets';
 import type { GroundingSource } from './llm';
 
 const TAVILY_URL = 'https://api.tavily.com/search';
+// Tavily caps `query` at 400 chars. A council question can be a multi-paragraph
+// brief, so collapse whitespace and truncate at a word boundary well under the
+// limit — the gist is enough to ground a search.
+const TAVILY_QUERY_MAX = 380;
+function toSearchQuery(q: string): string {
+  const flat = q.replace(/\s+/g, ' ').trim();
+  if (flat.length <= TAVILY_QUERY_MAX) return flat;
+  const cut = flat.slice(0, TAVILY_QUERY_MAX);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 200 ? cut.slice(0, lastSpace) : cut).trim();
+}
 
 // macOS Keychain lookup for an arbitrary service+account (the Tavily key is
 // stored under its own service, not the app's shared one).
@@ -94,7 +105,7 @@ export class ResearchSession {
       },
       body: JSON.stringify({
         api_key: this.key, // accepted in body too, for older Tavily clients
-        query,
+        query: toSearchQuery(query), // Tavily rejects queries over 400 chars
         search_depth: 'advanced',
         max_results: this.maxResults,
         include_answer: true,

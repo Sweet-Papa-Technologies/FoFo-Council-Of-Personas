@@ -28,7 +28,7 @@ interface CouncilResult {
   question: string;
   chairman: { content: string; error: string | null; sources: Source[] };
   devils_advocate: { content: string; error: string | null } | null;
-  research: { ran: boolean; sources: Source[]; note: string | null } | null;
+  research: { ran: boolean; query: string | null; sources: Source[]; note: string | null } | null;
   members: {
     name: string; label: string; status: 'ok' | 'error';
     answer: string; error: string | null; grounded: boolean; sources: Source[];
@@ -52,7 +52,7 @@ async function convene(
   let dissentError: string | null = null;
   let tally: TallyRow[] = [];
   let chairmanSources: Source[] = [];
-  let research: { ran: boolean; sources: Source[]; note: string | null } | null = null;
+  let research: { ran: boolean; query: string | null; sources: Source[]; note: string | null } | null = null;
   let fatal: string | null = null;
 
   // Progress accounting: advisors + devil's advocate + chairman.
@@ -85,9 +85,9 @@ async function convene(
       case 'member_error': { const m = members.get(d.id); if (m) m.error = d.error; break; }
       case 'member_sources': { const m = members.get(d.id); if (m) m.sources = d.sources || []; break; }
       case 'ranking_tally': tally = d.tally; break;
-      case 'research_done': research = { ran: true, sources: d.sources || [], note: null }; break;
-      case 'research_error': research = { ran: false, sources: [], note: d.reason || 'research failed' }; break;
-      case 'research_skipped': research = { ran: false, sources: [], note: d.reason || 'research skipped' }; break;
+      case 'research_done': research = { ran: true, query: d.query ?? null, sources: d.sources || [], note: null }; break;
+      case 'research_error': research = { ran: false, query: null, sources: [], note: d.reason || 'research failed' }; break;
+      case 'research_skipped': research = { ran: false, query: null, sources: [], note: d.reason || 'research skipped' }; break;
       case 'devils_advocate_done':
         dissent = d.content;
         if (total) report?.(total - 1, total, "Devil's Advocate challenged the consensus");
@@ -136,8 +136,11 @@ const shortQ = (q: string) => {
 // One-line, honest indicator of whether live grounding actually fired.
 function researchLine(r: CouncilResult): string | null {
   if (!r.research) return null;
-  if (r.research.ran) return `🔎 Research: live web grounding fired — ${r.research.sources.length} shared source(s).`;
-  return `⚠️ Research: did NOT ground — ${r.research.note ?? 'unavailable'}.`;
+  if (r.research.ran) {
+    const q = r.research.query ? ` (query: “${r.research.query}”)` : '';
+    return `🔎 Research: live web grounding fired${q} — ${r.research.sources.length} shared source(s).`;
+  }
+  return `⚠️ Research: did NOT ground — ${r.research.note ?? 'unavailable'} (run continued ungrounded).`;
 }
 
 // ---- Output formatters -------------------------------------------------------
