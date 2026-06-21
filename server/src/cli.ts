@@ -139,6 +139,11 @@ async function main(): Promise<void> {
           (m?.sources.length ? ` (${m.sources.length} sources)` : ''));
         break;
       }
+      case 'member_retry': {
+        const m = members.get(d.id);
+        progress(`  ↻ ${m?.name ?? d.id} retry #${d.attempt} (${d.reason})`);
+        break;
+      }
       case 'member_error': {
         const m = members.get(d.id);
         if (m) m.error = d.error;

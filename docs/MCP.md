@@ -18,10 +18,19 @@ returns the result.
 | `summary_only` | bool | `false` | Return only the Chairman synthesis + ranking, omitting the full advisor essays. |
 | `output_format` | `markdown` \| `json` \| `html` | `markdown` | See below. |
 
+### Summary card (uniform presentation)
+
+**Every** result leads with a compact **"Council summary"** card — a mobile-friendly
+2×2 tile grid (**🏁 Verdict / 📊 Confidence / ⚔️ Key dissent / ➡️ Next step**) plus a
+footer (advisors responded · top-ranked · grounded). `markdown` and `html` embed it
+ready to render; `json` carries it as a `summary` object with a `display_hint`. The
+result also includes a display directive asking the client to surface this card
+inline, before the detail, so the experience is consistent across calls.
+
 ### Output formats
 
-- **`markdown`** (default) — Chairman synthesis pinned on top, a research indicator
-  line, peer-ranking table, then the advisor essays (omitted if `summary_only`).
+- **`markdown`** (default) — the summary card, then Chairman synthesis, a research
+  indicator line, peer-ranking table, then the advisor essays (omitted if `summary_only`).
 - **`json`** — structured per-seat objects (`members`, `chairman`, `devils_advocate`,
   `rankings`, `research`) so the calling agent renders its own UI.
 - **`html`** — self-contained, theme-neutral, collapsible `<details>` per advisor,

@@ -8,7 +8,7 @@ import {
   type Persona,
   type CouncilConfig,
 } from './config';
-import { streamChat, type ChatAttachment, type GroundingSource } from './llm';
+import { streamChat, type ChatAttachment, type ChatResult, type ChatRequest, type GroundingSource } from './llm';
 import { ResearchSession } from './research';
 
 // Merge grounding sources from several origins, de-duped by URI.
@@ -16,6 +16,51 @@ function mergeSources(...lists: GroundingSource[][]): GroundingSource[] {
   const byUri = new Map<string, GroundingSource>();
   for (const list of lists) for (const s of list) if (s?.uri) byUri.set(s.uri, s);
   return [...byUri.values()];
+}
+
+// Abortable sleep for backoff between retries.
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(new Error('aborted'));
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); }, { once: true });
+  });
+}
+
+/**
+ * Stream a chat with retries + exponential backoff. An EMPTY response counts as a
+ * retryable failure (a blank answer is not a valid answer). 429 / rate-limit /
+ * quota / 5xx errors back off longer. Aborts (client disconnect) are not retried.
+ * Throws the last error if every attempt fails. `onRetry` lets the caller surface
+ * each retry (per-seat event, etc.).
+ */
+async function streamWithRetry(
+  conn: ReturnType<typeof getConnection>,
+  request: ChatRequest,
+  onDelta: (delta: string) => void,
+  signal: AbortSignal,
+  onRetry?: (reason: string, attempt: number) => void,
+  maxAttempts = 3,
+): Promise<ChatResult> {
+  let lastError = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const r = await streamChat(conn, request, onDelta);
+      if (r.text.trim()) return r;
+      lastError = 'empty response';
+    } catch (err) {
+      if (signal.aborted) throw err;
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt < maxAttempts) {
+      onRetry?.(lastError, attempt);
+      const slow = /429|rate.?limit|resource_exhausted|quota|HTTP 5\d\d|ECONN|ETIMEDOUT|fetch failed/i.test(lastError);
+      const base = slow ? 2000 : 500;            // 429/transient back off harder
+      const jitter = (attempt * 173) % 350;       // deterministic small jitter
+      await sleep(base * 2 ** (attempt - 1) + jitter, signal);
+    }
+  }
+  throw new Error(lastError || 'request failed');
 }
 
 export interface RunAttachment {
@@ -78,33 +123,26 @@ async function runSeat(
     signal,
   };
   // A seat occasionally streams nothing (refusal / hot-temp no-op) or hits a
-  // transient upstream error — common on the MaaS lineages. An empty answer is a
-  // FAILURE for an adversarial seat, not agreement. So retry ONCE on empty-or-error,
-  // then mark the seat failed so it's excluded from peer review + ranking and the
-  // Chairman treats it as a missing voice rather than silent consensus.
-  let content = '';
-  let sources: GroundingSource[] = [];
-  let lastError = '';
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const r = await streamChat(conn, request, (delta) => emit('member_token', { id, delta }));
-      if (r.text.trim()) { content = r.text; sources = r.sources; lastError = ''; break; }
-      lastError = 'empty response';
-    } catch (err) {
-      if (signal.aborted) throw err; // client disconnected — don't retry
-      lastError = err instanceof Error ? err.message : String(err);
-    }
-    if (attempt === 1) emit('member_retry', { id, reason: lastError });
-  }
-  if (!content.trim()) {
-    const error = `Failed after one retry: ${lastError || 'empty response'}.`;
+  // transient upstream error (429/5xx) — common on the MaaS lineages. An empty
+  // answer is a FAILURE for an adversarial seat, not agreement. Retry with backoff;
+  // if it still fails, mark the seat failed so it's excluded from peer review +
+  // ranking and the Chairman treats it as a missing voice, not silent consensus.
+  try {
+    const { text: content, sources } = await streamWithRetry(
+      conn, request,
+      (delta) => emit('member_token', { id, delta }),
+      signal,
+      (reason, attempt) => emit('member_retry', { id, reason, attempt }),
+    );
+    const allSources = mergeSources(sources, researchSources);
+    if (allSources.length) emit('member_sources', { id, sources: allSources });
+    emit('member_done', { id, content });
+    return { id, name: persona.name, label, ok: true, content };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
     emit('member_error', { id, error });
     return { id, name: persona.name, label, ok: false, content: '', error };
   }
-  const allSources = mergeSources(sources, researchSources);
-  if (allSources.length) emit('member_sources', { id, sources: allSources });
-  emit('member_done', { id, content });
-  return { id, name: persona.name, label, ok: true, content };
 }
 
 // ---- Stage 2: peer review ----------------------------------------------------
@@ -282,7 +320,7 @@ async function runDevilsAdvocate(
     `The council's answers:\n\n${answerBlocks}${briefBlock}\n\n` +
     `Now find where they are converging and argue the strongest case against it.`;
   try {
-    const { text } = await streamChat(
+    const { text } = await streamWithRetry(
       conn,
       {
         model,
@@ -292,6 +330,8 @@ async function runDevilsAdvocate(
         signal,
       },
       (delta) => emit('devils_advocate_token', { delta }),
+      signal,
+      (reason, attempt) => emit('devils_advocate_retry', { reason, attempt }),
     );
     emit('devils_advocate_done', { content: text });
     return text;
@@ -351,7 +391,7 @@ async function runChairman(
     `Now deliver your synthesis.`;
 
   try {
-    const { text: content, sources } = await streamChat(
+    const { text: content, sources } = await streamWithRetry(
       conn,
       {
         model: chairmanModel,
@@ -363,6 +403,8 @@ async function runChairman(
         signal,
       },
       (delta) => emit('chairman_token', { delta }),
+      signal,
+      (reason, attempt) => emit('chairman_retry', { reason, attempt }),
     );
     const allSources = mergeSources(sources, briefSources);
     if (allSources.length) emit('chairman_sources', { sources: allSources });

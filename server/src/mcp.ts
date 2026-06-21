@@ -142,11 +142,104 @@ function researchLine(r: CouncilResult): string | null {
   return `⚠️ Research: did NOT ground — ${r.research.note ?? 'unavailable'} (run continued ungrounded).`;
 }
 
+// ---- Summary tiles (uniform "card" the calling agent leads with) -------------
+
+interface SummaryTiles {
+  verdict: string;
+  confidence: string;
+  dissent: string;
+  nextStep: string;
+  footer: string;
+}
+
+// Tells the calling client/agent how to present EVERY result uniformly.
+const DISPLAY_DIRECTIVE =
+  '<!-- DISPLAY GUIDANCE (for the assistant rendering this tool result): Lead with the ' +
+  '"Council summary" card below — render it inline as a compact, mobile-friendly 2×2 tile ' +
+  'grid (Verdict / Confidence / Key dissent / Next step), uncluttered, ~one short line per ' +
+  'tile. Then present the fuller synthesis/detail after it (secondary or collapsible). Apply ' +
+  'this to every convene_council result so the experience is consistent. -->';
+const DISPLAY_HINT =
+  'Lead with the `summary` tiles as a compact, mobile-friendly 2×2 card (Verdict / Confidence / ' +
+  'Key dissent / Next step); show the rest as secondary detail.';
+
+const cell = (s: string) => s.replace(/\s+/g, ' ').replace(/\|/g, '∕').trim();
+
+function firstSentence(s: string, max = 150): string {
+  const flat = s.replace(/\s+/g, ' ').trim();
+  if (!flat) return '';
+  const dot = flat.search(/(?<=[.!?])\s/);
+  const end = dot > 30 && dot < max ? dot + 1 : Math.min(flat.length, max);
+  return flat.slice(0, end).trim() + (end < flat.length ? '…' : '');
+}
+
+// Heuristically split the Chairman synthesis into its labeled sections.
+const CHAIR_SECTIONS = ['CONSENSUS', 'CONFLICTS', 'BLIND SPOTS', 'RECOMMENDATION', 'NEXT STEP', 'CONFIDENCE'];
+function parseChairSections(content: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let current: string | null = null;
+  let buf: string[] = [];
+  const flush = () => { if (current) out[current] = buf.join(' ').replace(/\s+/g, ' ').trim(); buf = []; };
+  for (const raw of content.split('\n')) {
+    const stripped = raw.replace(/^[\s>*#_\-]+/, '').replace(/^\d+[.)]\s*/, '').trim();
+    const up = stripped.toUpperCase();
+    const hit = CHAIR_SECTIONS.find((s) => up.startsWith(s));
+    if (hit) {
+      flush();
+      current = hit;
+      const rest = stripped.slice(hit.length).replace(/^[\s:：—–\-*]+/, '').replace(/\*+/g, '').trim();
+      if (rest) buf.push(rest);
+    } else if (current && stripped) {
+      buf.push(stripped.replace(/\*+/g, ''));
+    }
+  }
+  flush();
+  return out;
+}
+
+function buildTiles(r: CouncilResult): SummaryTiles {
+  const sec = r.chairman.content ? parseChairSections(r.chairman.content) : {};
+  const okCount = r.members.filter((m) => m.status === 'ok').length;
+
+  const verdict = firstSentence(sec['RECOMMENDATION'] || '', 120) || (r.chairman.error ? 'Synthesis failed' : 'See synthesis');
+  const nextStep = firstSentence(sec['NEXT STEP'] || '', 110) || '—';
+  const confidence = firstSentence(sec['CONFIDENCE'] || '', 95)
+    || (okCount < r.members.length ? `Tempered — ${r.members.length - okCount} seat(s) dropped` : '—');
+
+  const da = r.devils_advocate?.content || '';
+  const crux = /crux[:\s]+([^\n.]+)/i.exec(da);
+  const dissent = da ? firstSentence(crux ? crux[1] : da, 120) : '—';
+
+  const top = r.rankings[0]?.name;
+  const grounded = r.research
+    ? (r.research.ran ? `grounded (${r.research.sources.length})` : 'ungrounded')
+    : null;
+  const footer = [`${okCount}/${r.members.length} advisors`, top ? `top: ${top}` : null, grounded]
+    .filter(Boolean).join(' · ');
+
+  return { verdict, confidence, dissent, nextStep, footer };
+}
+
+function summaryCardMd(t: SummaryTiles): string[] {
+  return [
+    '### 🏛️ Council summary',
+    '',
+    '|  |  |',
+    '|---|---|',
+    `| **🏁 Verdict**<br>${cell(t.verdict)} | **📊 Confidence**<br>${cell(t.confidence)} |`,
+    `| **⚔️ Key dissent**<br>${cell(t.dissent)} | **➡️ Next step**<br>${cell(t.nextStep)} |`,
+    '',
+    t.footer ? `<sub>${cell(t.footer)}</sub>` : '',
+    '',
+  ];
+}
+
 // ---- Output formatters -------------------------------------------------------
 
 function renderMarkdown(r: CouncilResult, summaryOnly: boolean): string {
   const L: string[] = [];
-  L.push(`# Council of Personas — “${shortQ(r.question)}”`, '');
+  L.push(DISPLAY_DIRECTIVE, '');
+  L.push(...summaryCardMd(buildTiles(r)));
   L.push(`**Question:** ${r.question.replace(/\s+/g, ' ').trim()}`, '');
   const rl = researchLine(r);
   if (rl) L.push(rl, '');
@@ -253,12 +346,25 @@ function renderHtml(r: CouncilResult, summaryOnly: boolean): string {
 .${P}-tbl th,.${P}-tbl td{border:1px solid rgba(127,127,127,.3);padding:4px 12px;text-align:left}
 .${P}-src,.${P}-meta{font-size:.8rem;opacity:.7;margin-top:.6em}
 .${P}-err{color:#ff6b6b}
+.${P}-tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:.2em 0 1em}
+@media (max-width:520px){.${P}-tiles{grid-template-columns:1fr}}
+.${P}-tile{border:1px solid rgba(127,127,127,.3);border-radius:12px;padding:10px 14px;background:rgba(127,127,127,.06)}
+.${P}-tile .l{font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;opacity:.65}
+.${P}-tile .v{margin-top:3px;font-size:.92rem}
 `;
+  const t = buildTiles(r);
+  const tile = (label: string, val: string) =>
+    `<div class="${P}-tile"><div class="l">${label}</div><div class="v">${esc(val)}</div></div>`;
+  const tiles =
+    `<div class="${P}-tiles">${tile('🏁 Verdict', t.verdict)}${tile('📊 Confidence', t.confidence)}` +
+    `${tile('⚔️ Key dissent', t.dissent)}${tile('➡️ Next step', t.nextStep)}</div>` +
+    (t.footer ? `<p class="${P}-meta">${esc(t.footer)}</p>` : '');
   const rl = researchLine(r);
   return (
     `<style>${css}</style>` +
     `<div class="${P}">` +
     `<h1>Council of Personas — “${esc(shortQ(r.question))}”</h1>` +
+    tiles +
     `<p class="${P}-meta"><strong>Question:</strong> ${esc(r.question.replace(/\s+/g, ' ').trim())}</p>` +
     (rl ? `<p class="${P}-meta">${esc(rl)}</p>` : '') +
     `<section class="${P}-hero"><h2>⚖️ Chairman's Synthesis</h2>${chair}${chairSrc}${ranking ? '<h3>Peer ranking</h3>' + ranking : ''}</section>` +
@@ -296,7 +402,8 @@ function buildServer(): McpServer {
         'converge (anti-framing guard); finally a Chairman synthesizes a recommendation with a ' +
         'confidence/cruxes calibration. A genuine multi-perspective second opinion. Use for decisions, ' +
         'design/architecture reviews, strategy, or any question that benefits from clashing viewpoints. ' +
-        'Takes ~20–60s.',
+        'Takes ~20–60s. Every result leads with a compact "Council summary" card (Verdict / Confidence / ' +
+        'Key dissent / Next step) — surface it inline, mobile-friendly, before the detail.',
       inputSchema: {
         question: z.string().min(1).describe('The question to put to the council.'),
         peer_review: z.boolean().optional().describe('Run the peer-review/ranking stage (default: council.yaml setting).'),
@@ -361,9 +468,11 @@ function buildServer(): McpServer {
         }
 
         if (fmt === 'json') {
+          const tiles = buildTiles(result);
+          const head = { summary: tiles, display_hint: DISPLAY_HINT };
           const json = summary
-            ? { question: result.question, chairman: result.chairman, devils_advocate: result.devils_advocate, rankings: result.rankings }
-            : result;
+            ? { ...head, question: result.question, chairman: result.chairman, devils_advocate: result.devils_advocate, rankings: result.rankings }
+            : { ...head, ...result };
           return { content: [{ type: 'text', text: JSON.stringify(json, null, 2) }] };
         }
         const text = fmt === 'html' ? renderHtml(result, summary) : renderMarkdown(result, summary);

@@ -201,8 +201,9 @@ curl -s localhost:8787/api/health | jq
    search → a shared brief grounding every role. Best-effort; never aborts the run.
 1. **Fan-out** — the question goes to every seat in parallel (`Promise.all`); each
    response streams into its own card. **If a seat errors or returns empty, it's
-   retried once, then marked failed and the run continues** — a single failure never
-   sinks the run, and an empty answer is never shipped as a real one.
+   retried with backoff (longer for 429/rate-limits), then marked failed and the run
+   continues** — a single failure never sinks the run, and an empty answer is never
+   shipped as a real one. The Chairman and Devil's Advocate retry the same way.
 2. **Peer review** (`settings.peer_review`, default on) — each seat receives the
    *other* seats' answers anonymized (`Advisor A/B/C…`), critiques and ranks them with a
    strict `FINAL RANKING:` block parsed into a Borda-style tally. Failed seats are
