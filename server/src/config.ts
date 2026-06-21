@@ -39,9 +39,13 @@ export interface CouncilConfig {
     review_model?: string;
     // Default web-search state for seats that don't set `search` themselves.
     web_search: boolean;
+    // Run the standing Devil's Advocate dissent stage (anti-framing guard).
+    devils_advocate: boolean;
   };
   council: Persona[];
   chairman: Persona;
+  // Optional editable Devil's Advocate prompt; falls back to a built-in default.
+  devils_advocate?: Persona;
 }
 
 // Sensible defaults so a brand-new user only needs ONE thing: an API key.
@@ -156,8 +160,10 @@ export function loadCouncilConfig(): CouncilConfig {
       chairman_temperature: settings.chairman_temperature ?? 0.3,
       review_model: settings.review_model,
       web_search: settings.web_search ?? false,
+      devils_advocate: settings.devils_advocate ?? true,
     },
     council,
     chairman,
+    ...(data.devils_advocate ? { devils_advocate: data.devils_advocate } : {}),
   };
 }

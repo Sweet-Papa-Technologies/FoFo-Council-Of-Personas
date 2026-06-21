@@ -182,6 +182,64 @@ function tallyRankings(
     .sort((a, b) => b.points - a.points);
 }
 
+// ---- Stage 2.5: standing Devil's Advocate (anti-framing guard) ---------------
+
+const DEFAULT_DEVILS_ADVOCATE: Persona = {
+  name: "Devil's Advocate",
+  accent: 'blue',
+  icon: 'gavel',
+  tagline: 'Anti-Framing Dissent',
+  temperature: 0.4,
+  system_prompt:
+    "You are the DEVIL'S ADVOCATE on an advisory council. You are shown the question and " +
+    "the advisors' answers. Your ONLY job is to find where the council is CONVERGING — the " +
+    'direction they mostly agree on — and argue the strongest, most credible case AGAINST it, ' +
+    'no matter which way they lean. First name the emerging consensus in one sentence. Then make ' +
+    'the best argument that it is wrong, premature, or an artifact of how the question was framed; ' +
+    'steelman the opposite conclusion. Identify the CRUX: the specific fact that, if true, would ' +
+    'flip the recommendation. If the consensus genuinely survives your strongest attack, say so and ' +
+    'why. Attack the reasoning and evidence, never the people. Be sharp and specific.',
+};
+
+async function runDevilsAdvocate(
+  conn: ReturnType<typeof getConnection>,
+  cfg: CouncilConfig,
+  persona: Persona,
+  question: string,
+  seats: SeatResult[], // successful seats
+  model: string,
+  emit: Emit,
+  signal: AbortSignal,
+): Promise<string | null> {
+  emit('devils_advocate_start', {});
+  const answerBlocks = seats
+    .map((s) => `### ${s.name}\n${s.content}`)
+    .join('\n\n');
+  const user =
+    `The question put to the council:\n"""${question}"""\n\n` +
+    `The council's answers:\n\n${answerBlocks}\n\n` +
+    `Now find where they are converging and argue the strongest case against it.`;
+  try {
+    const { text } = await streamChat(
+      conn,
+      {
+        model,
+        system: persona.system_prompt,
+        user,
+        temperature: tempFor(persona, cfg.settings.chairman_temperature),
+        signal,
+      },
+      (delta) => emit('devils_advocate_token', { delta }),
+    );
+    emit('devils_advocate_done', { content: text });
+    return text;
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    emit('devils_advocate_error', { error });
+    return null;
+  }
+}
+
 // ---- Stage 3: chairman -------------------------------------------------------
 
 async function runChairman(
@@ -190,6 +248,7 @@ async function runChairman(
   question: string,
   seats: SeatResult[],
   rankingSummary: string | null,
+  dissent: string | null,
   chairmanModel: string,
   search: boolean,
   emit: Emit,
@@ -214,9 +273,15 @@ async function runChairman(
       `(best first):\n${rankingSummary}\n`
     : '';
 
+  const dissentBlock = dissent
+    ? `\n\nThe Devil's Advocate then challenged wherever the council was converging. ` +
+      `Weigh this dissent seriously — it exists to stop framing-driven consensus from ` +
+      `passing unchecked:\n\n${dissent}\n`
+    : '';
+
   const user =
     `The question put to the council:\n"""${question}"""\n\n` +
-    `The council's answers:\n\n${answerBlocks}${rankingBlock}${failureNote}\n\n` +
+    `The council's answers:\n\n${answerBlocks}${rankingBlock}${dissentBlock}${failureNote}\n\n` +
     `Now deliver your synthesis.`;
 
   try {
@@ -252,6 +317,7 @@ export interface RunOptions {
   chairmanSearch?: boolean; // web-search override for the chairman
   searchAll?: boolean; // blanket web-search override for every seat + chairman (CLI)
   attachments?: RunAttachment[]; // files attached to the question (council members see them)
+  devilsAdvocate?: boolean; // run the standing Devil's Advocate stage (default: council.yaml)
 }
 
 export async function runCouncil(
@@ -263,6 +329,8 @@ export async function runCouncil(
   const cfg = loadCouncilConfig();
   const conn = getConnection();
   const peerReview = opts.peerReview ?? cfg.settings.peer_review;
+  const devilsAdvocate = opts.devilsAdvocate ?? cfg.settings.devils_advocate;
+  const daPersona = cfg.devils_advocate ?? DEFAULT_DEVILS_ADVOCATE;
 
   // Effective model per role — UI override → council.yaml → connection default.
   const councilModel = opts.councilModel || conn.model;
@@ -308,6 +376,9 @@ export async function runCouncil(
     peer_review: peerReview,
     chairman: cfg.chairman.name,
     chairman_search: chairmanSearch,
+    devils_advocate: devilsAdvocate
+      ? { name: daPersona.name, accent: daPersona.accent, icon: daPersona.icon, tagline: daPersona.tagline }
+      : null,
   });
 
   // Stage 1 — fan out in parallel; each seat catches its own errors.
@@ -348,9 +419,18 @@ export async function runCouncil(
     }
   }
 
+  // Stage 2.5 — standing Devil's Advocate (needs at least two answers to find a
+  // convergence to argue against). Runs on the fast/peer-review tier by default.
+  let dissent: string | null = null;
+  if (devilsAdvocate && succeeded.length >= 2) {
+    emit('stage', { stage: 'devils_advocate' });
+    const daModel = daPersona.model || reviewModel;
+    dissent = await runDevilsAdvocate(conn, cfg, daPersona, question, succeeded, daModel, emit, signal);
+  }
+
   // Stage 3 — chairman synthesis.
   emit('stage', { stage: 'chairman' });
-  await runChairman(conn, cfg, question, seats, rankingSummary, chairmanModel, chairmanSearch, emit, signal);
+  await runChairman(conn, cfg, question, seats, rankingSummary, dissent, chairmanModel, chairmanSearch, emit, signal);
 
   emit('done', {});
 }

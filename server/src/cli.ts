@@ -14,6 +14,7 @@ interface ParsedArgs {
   quiet: boolean;
   review?: boolean; // undefined = use council.yaml default
   search?: boolean; // undefined = use council.yaml default; true = all seats search
+  devil?: boolean; // undefined = use council.yaml default
   help: boolean;
 }
 
@@ -27,6 +28,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a === '--review') out.review = true;
     else if (a === '--search') out.search = true;
     else if (a === '--no-search') out.search = false;
+    else if (a === '--no-devil') out.devil = false;
+    else if (a === '--devil') out.devil = true;
     else if (a === '--help' || a === '-h') out.help = true;
     else qparts.push(a);
   }
@@ -45,6 +48,7 @@ Usage:
 Options:
   --json        Emit structured JSON instead of Markdown
   --no-review   Skip the peer-review stage (faster)
+  --no-devil    Skip the standing Devil's Advocate dissent stage
   --search      Enable live Google Search grounding for every seat (Gemini)
   --no-search   Disable web search for this run
   --quiet       Suppress progress output on stderr
@@ -93,6 +97,8 @@ async function main(): Promise<void> {
   let tally: TallyRow[] = [];
   let fatal: string | null = null;
   let peerReview = true;
+  let dissent = '';
+  let dissentError: string | null = null;
   let chairmanSources: { title: string; uri: string }[] = [];
 
   const progress = (s: string) => {
@@ -143,6 +149,13 @@ async function main(): Promise<void> {
       case 'ranking_tally':
         tally = d.tally;
         break;
+      case 'devils_advocate_done':
+        dissent = d.content;
+        progress("  ✓ Devil's Advocate challenged the consensus");
+        break;
+      case 'devils_advocate_error':
+        dissentError = d.error;
+        break;
       case 'chairman_sources':
         chairmanSources = d.sources || [];
         break;
@@ -161,9 +174,10 @@ async function main(): Promise<void> {
 
   const ac = new AbortController();
   try {
-    const runOpts: { peerReview?: boolean; searchAll?: boolean } = {};
+    const runOpts: { peerReview?: boolean; searchAll?: boolean; devilsAdvocate?: boolean } = {};
     if (typeof args.review === 'boolean') runOpts.peerReview = args.review;
     if (typeof args.search === 'boolean') runOpts.searchAll = args.search;
+    if (typeof args.devil === 'boolean') runOpts.devilsAdvocate = args.devil;
     await runCouncil(args.question, emit, ac.signal, runOpts);
   } catch (err) {
     fatal = err instanceof Error ? err.message : String(err);
@@ -180,6 +194,7 @@ async function main(): Promise<void> {
     process.stdout.write(JSON.stringify({
       question: args.question,
       peer_review: peerReview,
+      devils_advocate: dissent || dissentError ? { content: dissent || null, error: dissentError } : null,
       chairman: { content: chairman, error: chairmanError },
       members: memberList.map((m) => ({
         id: m.id, name: m.name, label: m.label, accent: m.accent,
@@ -214,6 +229,13 @@ async function main(): Promise<void> {
     L.push('| # | Advisor | Points | Ballots |');
     L.push('|--:|---------|-------:|--------:|');
     tally.forEach((t, i) => L.push(`| ${i + 1} | ${t.name} | ${t.points} | ${t.appearances} |`));
+    L.push('');
+  }
+
+  if (dissent || dissentError) {
+    L.push("### ⚔️ Devil's Advocate");
+    L.push('');
+    L.push(dissentError ? `> ⚠️ ${dissentError}` : dissent);
     L.push('');
   }
 
