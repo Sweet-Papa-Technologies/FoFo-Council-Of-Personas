@@ -103,6 +103,8 @@ app.post('/api/council/run', async (c) => {
     chairman_model?: string;
     search_overrides?: Record<string, boolean>;
     chairman_search?: boolean;
+    devils_advocate?: boolean;
+    research?: boolean;
     attachments?: { name: string; mime: string; text?: string; data?: string }[];
   };
   try {
@@ -120,6 +122,9 @@ app.post('/api/council/run', async (c) => {
     searchOverrides: body.search_overrides as Record<number, boolean> | undefined,
     chairmanSearch:
       typeof body.chairman_search === 'boolean' ? body.chairman_search : undefined,
+    devilsAdvocate:
+      typeof body.devils_advocate === 'boolean' ? body.devils_advocate : undefined,
+    research: typeof body.research === 'boolean' ? body.research : undefined,
     attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
   };
 

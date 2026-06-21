@@ -14,6 +14,7 @@ interface ParsedArgs {
   quiet: boolean;
   review?: boolean; // undefined = use council.yaml default
   search?: boolean; // undefined = use council.yaml default; true = all seats search
+  research?: boolean; // Tavily research brief injected into every role
   devil?: boolean; // undefined = use council.yaml default
   help: boolean;
 }
@@ -30,6 +31,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     else if (a === '--no-search') out.search = false;
     else if (a === '--no-devil') out.devil = false;
     else if (a === '--devil') out.devil = true;
+    else if (a === '--research') out.research = true;
+    else if (a === '--no-research') out.research = false;
     else if (a === '--help' || a === '-h') out.help = true;
     else qparts.push(a);
   }
@@ -49,8 +52,9 @@ Options:
   --json        Emit structured JSON instead of Markdown
   --no-review   Skip the peer-review stage (faster)
   --no-devil    Skip the standing Devil's Advocate dissent stage
-  --search      Enable live Google Search grounding for every seat (Gemini)
-  --no-search   Disable web search for this run
+  --search      Enable native model search grounding for every seat (Gemini)
+  --no-search   Disable native web search for this run
+  --research    Inject one shared Tavily web-research brief into every role
   --quiet       Suppress progress output on stderr
   -h, --help    Show this help
 
@@ -174,10 +178,11 @@ async function main(): Promise<void> {
 
   const ac = new AbortController();
   try {
-    const runOpts: { peerReview?: boolean; searchAll?: boolean; devilsAdvocate?: boolean } = {};
+    const runOpts: { peerReview?: boolean; searchAll?: boolean; devilsAdvocate?: boolean; research?: boolean } = {};
     if (typeof args.review === 'boolean') runOpts.peerReview = args.review;
     if (typeof args.search === 'boolean') runOpts.searchAll = args.search;
     if (typeof args.devil === 'boolean') runOpts.devilsAdvocate = args.devil;
+    if (typeof args.research === 'boolean') runOpts.research = args.research;
     await runCouncil(args.question, emit, ac.signal, runOpts);
   } catch (err) {
     fatal = err instanceof Error ? err.message : String(err);

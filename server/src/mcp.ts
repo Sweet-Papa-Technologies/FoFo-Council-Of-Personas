@@ -38,7 +38,7 @@ interface CouncilResult {
 // Run the council and collect its streamed events into a structured result.
 async function convene(
   question: string,
-  opts: { peerReview?: boolean; search?: boolean },
+  opts: { peerReview?: boolean; search?: boolean; research?: boolean },
 ): Promise<CouncilResult> {
   const members = new Map<number, Member>();
   let chairman = '';
@@ -70,9 +70,10 @@ async function convene(
     }
   };
 
-  const runOpts: { peerReview?: boolean; searchAll?: boolean } = {};
+  const runOpts: { peerReview?: boolean; searchAll?: boolean; research?: boolean } = {};
   if (typeof opts.peerReview === 'boolean') runOpts.peerReview = opts.peerReview;
   if (typeof opts.search === 'boolean') runOpts.searchAll = opts.search;
+  if (typeof opts.research === 'boolean') runOpts.research = opts.research;
   await runCouncil(question, emit, new AbortController().signal, runOpts);
   if (fatal) throw new Error(fatal);
 
@@ -230,12 +231,13 @@ function buildServer(): McpServer {
       inputSchema: {
         question: z.string().min(1).describe('The question to put to the council.'),
         peer_review: z.boolean().optional().describe('Run the peer-review/ranking stage (default: council.yaml setting).'),
-        web_search: z.boolean().optional().describe('Ground every advisor + the Chairman with live web search (default off).'),
+        web_search: z.boolean().optional().describe('Ground advisors with native model search (Gemini Google Search) (default off).'),
+        research: z.boolean().optional().describe('Inject one shared live web-research brief (Tavily) into EVERY advisor, the Devil’s Advocate, and the Chairman — provider-agnostic grounding so the whole council reasons from the same evidence. Default off.'),
         summary_only: z.boolean().optional().describe('Return only the Chairman synthesis + peer ranking, omitting the full advisor essays. Good for decisions where the synthesis is the deliverable. Default false.'),
         output_format: z.enum(['markdown', 'json', 'html']).optional().describe('markdown (default) | json (structured per-seat objects for the agent to render itself) | html (self-contained, collapsible, no scripts).'),
       },
     },
-    async ({ question, peer_review, web_search, summary_only, output_format }) => {
+    async ({ question, peer_review, web_search, research, summary_only, output_format }) => {
       const fmt = output_format ?? 'markdown';
       const summary = summary_only ?? false;
       try {
@@ -246,9 +248,10 @@ function buildServer(): McpServer {
             content: [{ type: 'text', text: 'Error: `question` is required and must be non-empty.' }],
           };
         }
-        const opts: { peerReview?: boolean; search?: boolean } = {};
+        const opts: { peerReview?: boolean; search?: boolean; research?: boolean } = {};
         if (typeof peer_review === 'boolean') opts.peerReview = peer_review;
         if (typeof web_search === 'boolean') opts.search = web_search;
+        if (typeof research === 'boolean') opts.research = research;
 
         const result = await convene(q, opts);
 

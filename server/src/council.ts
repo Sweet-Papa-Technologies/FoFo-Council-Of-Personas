@@ -8,7 +8,15 @@ import {
   type Persona,
   type CouncilConfig,
 } from './config';
-import { streamChat, type ChatAttachment } from './llm';
+import { streamChat, type ChatAttachment, type GroundingSource } from './llm';
+import { ResearchSession } from './research';
+
+// Merge grounding sources from several origins, de-duped by URI.
+function mergeSources(...lists: GroundingSource[][]): GroundingSource[] {
+  const byUri = new Map<string, GroundingSource>();
+  for (const list of lists) for (const s of list) if (s?.uri) byUri.set(s.uri, s);
+  return [...byUri.values()];
+}
 
 export interface RunAttachment {
   name: string;
@@ -55,6 +63,7 @@ async function runSeat(
   defaultModel: string,
   search: boolean,
   attachments: ChatAttachment[],
+  researchSources: GroundingSource[],
   emit: Emit,
   signal: AbortSignal,
 ): Promise<SeatResult> {
@@ -73,7 +82,8 @@ async function runSeat(
       },
       (delta) => emit('member_token', { id, delta }),
     );
-    if (sources.length) emit('member_sources', { id, sources });
+    const allSources = mergeSources(sources, researchSources);
+    if (allSources.length) emit('member_sources', { id, sources: allSources });
     emit('member_done', { id, content });
     return { id, name: persona.name, label, ok: true, content };
   } catch (err) {
@@ -207,6 +217,7 @@ async function runDevilsAdvocate(
   persona: Persona,
   question: string,
   seats: SeatResult[], // successful seats
+  brief: string,
   model: string,
   emit: Emit,
   signal: AbortSignal,
@@ -215,9 +226,10 @@ async function runDevilsAdvocate(
   const answerBlocks = seats
     .map((s) => `### ${s.name}\n${s.content}`)
     .join('\n\n');
+  const briefBlock = brief ? `\n\n${brief}\n` : '';
   const user =
     `The question put to the council:\n"""${question}"""\n\n` +
-    `The council's answers:\n\n${answerBlocks}\n\n` +
+    `The council's answers:\n\n${answerBlocks}${briefBlock}\n\n` +
     `Now find where they are converging and argue the strongest case against it.`;
   try {
     const { text } = await streamChat(
@@ -249,6 +261,8 @@ async function runChairman(
   seats: SeatResult[],
   rankingSummary: string | null,
   dissent: string | null,
+  brief: string,
+  briefSources: GroundingSource[],
   chairmanModel: string,
   search: boolean,
   emit: Emit,
@@ -279,9 +293,11 @@ async function runChairman(
       `passing unchecked:\n\n${dissent}\n`
     : '';
 
+  const briefBlock = brief ? `\n\n${brief}\n` : '';
+
   const user =
     `The question put to the council:\n"""${question}"""\n\n` +
-    `The council's answers:\n\n${answerBlocks}${rankingBlock}${dissentBlock}${failureNote}\n\n` +
+    `The council's answers:\n\n${answerBlocks}${rankingBlock}${dissentBlock}${briefBlock}${failureNote}\n\n` +
     `Now deliver your synthesis.`;
 
   try {
@@ -298,7 +314,8 @@ async function runChairman(
       },
       (delta) => emit('chairman_token', { delta }),
     );
-    if (sources.length) emit('chairman_sources', { sources });
+    const allSources = mergeSources(sources, briefSources);
+    if (allSources.length) emit('chairman_sources', { sources: allSources });
     emit('chairman_done', { content });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -318,6 +335,7 @@ export interface RunOptions {
   searchAll?: boolean; // blanket web-search override for every seat + chairman (CLI)
   attachments?: RunAttachment[]; // files attached to the question (council members see them)
   devilsAdvocate?: boolean; // run the standing Devil's Advocate stage (default: council.yaml)
+  research?: boolean; // inject a shared Tavily research brief into every role (default: council.yaml)
 }
 
 export async function runCouncil(
@@ -356,6 +374,27 @@ export async function runCouncil(
     ? `${question}\n\n--- Attached context ---\n${textBlocks.join('\n\n')}\n--- End attached context ---`
     : question;
 
+  // Provider-agnostic grounding: one shared research brief for every role, so
+  // non-Gemini seats and the Chairman ground from the same evidence. Soft-fails.
+  const researchEnabled = opts.research ?? cfg.settings.research;
+  let briefText = '';
+  let briefSources: GroundingSource[] = [];
+  if (researchEnabled) {
+    const session = new ResearchSession();
+    if (session.enabled) {
+      emit('stage', { stage: 'research' });
+      const brief = await session.brief(question, signal);
+      if (brief) {
+        briefText = brief.text;
+        briefSources = brief.sources;
+        emit('research_done', { sources: briefSources });
+      }
+    } else {
+      emit('research_skipped', { reason: 'no Tavily API key configured' });
+    }
+  }
+  const groundedQuestion = briefText ? `${memberQuestion}\n\n${briefText}` : memberQuestion;
+
   const roster = cfg.council.map((p, i) => ({
     persona: p,
     id: i,
@@ -376,6 +415,7 @@ export async function runCouncil(
     peer_review: peerReview,
     chairman: cfg.chairman.name,
     chairman_search: chairmanSearch,
+    research: !!researchEnabled,
     devils_advocate: devilsAdvocate
       ? { name: daPersona.name, accent: daPersona.accent, icon: daPersona.icon, tagline: daPersona.tagline }
       : null,
@@ -385,7 +425,7 @@ export async function runCouncil(
   emit('stage', { stage: 'fanout' });
   const seats = await Promise.all(
     roster.map((r) =>
-      runSeat(conn, cfg, r.persona, r.id, r.label, memberQuestion, councilModel, r.search, binaryAtts, emit, signal),
+      runSeat(conn, cfg, r.persona, r.id, r.label, groundedQuestion, councilModel, r.search, binaryAtts, briefSources, emit, signal),
     ),
   );
 
@@ -425,12 +465,12 @@ export async function runCouncil(
   if (devilsAdvocate && succeeded.length >= 2) {
     emit('stage', { stage: 'devils_advocate' });
     const daModel = daPersona.model || reviewModel;
-    dissent = await runDevilsAdvocate(conn, cfg, daPersona, question, succeeded, daModel, emit, signal);
+    dissent = await runDevilsAdvocate(conn, cfg, daPersona, question, succeeded, briefText, daModel, emit, signal);
   }
 
   // Stage 3 — chairman synthesis.
   emit('stage', { stage: 'chairman' });
-  await runChairman(conn, cfg, question, seats, rankingSummary, dissent, chairmanModel, chairmanSearch, emit, signal);
+  await runChairman(conn, cfg, question, seats, rankingSummary, dissent, briefText, briefSources, chairmanModel, chairmanSearch, emit, signal);
 
   emit('done', {});
 }

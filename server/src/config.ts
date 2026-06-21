@@ -41,6 +41,9 @@ export interface CouncilConfig {
     web_search: boolean;
     // Run the standing Devil's Advocate dissent stage (anti-framing guard).
     devils_advocate: boolean;
+    // Provider-agnostic grounding (Tavily): inject one shared research brief into
+    // every seat + the Chairman. Needs a Tavily key (Keychain/env). Default off.
+    research: boolean;
   };
   council: Persona[];
   chairman: Persona;
@@ -161,6 +164,7 @@ export function loadCouncilConfig(): CouncilConfig {
       review_model: settings.review_model,
       web_search: settings.web_search ?? false,
       devils_advocate: settings.devils_advocate ?? true,
+      research: settings.research ?? false,
     },
     council,
     chairman,
