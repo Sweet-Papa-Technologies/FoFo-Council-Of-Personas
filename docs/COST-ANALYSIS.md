@@ -72,9 +72,9 @@ Floor for real margin: **$29/mo or ~$0.40/run**. Go higher when bundling the gro
 
 ## Cost monitoring (set up 2026-06-21)
 
-- **Cloud Billing budget** "Council of Personas (fofoapps)" — $50/mo, scoped to project
-  `fofoapps-934be` (#851869525836), email alerts at 50% / 90% / 100%.
-- **Caveat:** that project also hosts **fofoclip** and **Sense**, so the budget tracks
-  *total project spend*, not Council-only. For clean per-product attribution:
+- **Cloud Billing budget** ("Council of Personas") — e.g. $50/mo, scoped to the project,
+  `your-gcp-project`, email alerts at 50% / 90% / 100%.
+- **Caveat:** if the GCP project hosts other apps too, the budget tracks *total project
+  spend*, not Council-only. For clean per-product attribution:
   - a **dedicated GCP project** for Council (best — isolates billing/IAM/quotas), or
   - **BigQuery billing export** filtered by service (Vertex AI vs. Generative Language API).

@@ -61,7 +61,7 @@ Vertex calls use **Application Default Credentials** via `google-auth-library`:
 - **Local:** `gcloud auth application-default login`. The provider sends
   `x-goog-user-project` so user ADC has a quota project.
 
-Config: `VERTEX_PROJECT` (default `fofoapps-934be`), `VERTEX_LOCATION` (default
+Config: `VERTEX_PROJECT` (your project — env, `GOOGLE_CLOUD_PROJECT`, or Keychain; no default), `VERTEX_LOCATION` (default
 `global` — where Claude 4.6 and the MaaS models live).
 
 ### Enabling models & verified IDs
@@ -123,7 +123,7 @@ ungrounded synthesis hallucinates).
 - **Best-effort:** a missing/invalid key or a failed search **never aborts the run** —
   it proceeds ungrounded and the outcome is surfaced (`research` field / a one-line
   indicator showing the query + source count, or a warning).
-- **Key:** `TAVILY_API_KEY` env, or the Keychain service `tavily-spt-dev`. In prod,
+- **Key:** `TAVILY_API_KEY` env, or the macOS Keychain (service `council-of-personas`). In prod,
   Secret Manager `council-tavily-key` → `TAVILY_API_KEY`.
 - **Enable:** `settings.research: true`, MCP `research: true`, CLI `--research`, or
   HTTP `research`.

@@ -381,12 +381,16 @@ function renderHtml(r: CouncilResult, summaryOnly: boolean): string {
   );
 }
 
-const ICON_BASE = 'https://storage.googleapis.com/fofoapps-934be-council-assets/icons';
-const ICONS = [
-  { src: `${ICON_BASE}/icon-48.png`, mimeType: 'image/png', sizes: ['48x48'] },
-  { src: `${ICON_BASE}/icon-128.png`, mimeType: 'image/png', sizes: ['128x128'] },
-  { src: `${ICON_BASE}/icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
-];
+// Optional MCP server icons. Host your own (e.g. a public GCS bucket) and point
+// ICON_BASE_URL at the folder containing icon-48/128/512.png. Unset → no icons.
+const ICON_BASE = process.env.ICON_BASE_URL?.replace(/\/+$/, '');
+const ICONS = ICON_BASE
+  ? [
+      { src: `${ICON_BASE}/icon-48.png`, mimeType: 'image/png', sizes: ['48x48'] },
+      { src: `${ICON_BASE}/icon-128.png`, mimeType: 'image/png', sizes: ['128x128'] },
+      { src: `${ICON_BASE}/icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
+    ]
+  : undefined;
 
 function buildServer(): McpServer {
   const server = new McpServer({
@@ -395,7 +399,7 @@ function buildServer(): McpServer {
     title: 'Council of Personas',
     description: 'A council of adversarial AI advisors that debate, peer-review, and synthesize a recommendation.',
     websiteUrl: 'https://github.com/Sweet-Papa-Technologies/FoFo-Council-Of-Personas',
-    icons: ICONS,
+    ...(ICONS ? { icons: ICONS } : {}),
   });
 
   server.registerTool(

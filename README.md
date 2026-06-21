@@ -111,10 +111,10 @@ precedence) is in **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
 | API key | **yes** | `GEMINI_API_KEY`, `LLM_API_KEY`, `LITELLM_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY` | Sent as `Authorization: Bearer <key>`. A free Gemini key (`AIza…`) is the easy path. |
 | Base URL | no | `LLM_BASE_URL`, `LITELLM_BASE_URL`, `OPENAI_BASE_URL` | Any OpenAI-compatible endpoint. **Defaults to Gemini** (`…/v1beta/openai`) when only a key is set. |
 | Model | no | `COUNCIL_MODEL`, `LLM_MODEL` | Default model for the **council members** (the "medium" tier). Defaults to `gemini-2.5-flash`. A seat can override `model` in `council.yaml` (incl. non-Gemini lineages — see [Models](docs/MODELS-AND-GROUNDING.md)). |
-| **Tavily key** | no | `TAVILY_API_KEY` (or Keychain `tavily-spt-dev`) | Enables the provider-agnostic `research` grounding for every seat + Chairman. |
+| **Tavily key** | no | `TAVILY_API_KEY` (or the Keychain via `npm run secrets:set`) | Enables the provider-agnostic `research` grounding for every seat + Chairman. |
 | `PORT` | no | — | API port (default `8787`). |
 | `COUNCIL_CONFIG` | no | — | Path to the roster file (default `./council.yaml`). |
-| `VERTEX_PROJECT` / `VERTEX_LOCATION` | no | — | GCP project / location for Vertex seats (defaults `fofoapps-934be` / `global`). |
+| `VERTEX_PROJECT` / `VERTEX_LOCATION` | no | — | GCP project / location for Vertex seats. Set `VERTEX_PROJECT` to your project (no default); `VERTEX_LOCATION` defaults `global`. |
 
 ### Where secrets come from
 
@@ -131,15 +131,11 @@ Keychain entries live under the service name **`council-of-personas`** (visible 
 Keychain Access). On non-macOS machines the Keychain is skipped and `.env` is used —
 so `.env` is the portable path for teammates who don't use macOS.
 
-> **This machine is already set up.** A Gemini API key was minted with `gcloud` and
-> the three values are in the Keychain, pointing straight at Gemini's OpenAI-compatible
-> endpoint — no separate LiteLLM proxy required. Just `npm run dev` and ask.
->
-> - **Key:** GCP API key named *"Council of Personas"*, scoped to
->   `generativelanguage.googleapis.com`, in project **`fofoapps-934be`**.
-> - **Rotate / revoke:** list with `gcloud services api-keys list --project=fofoapps-934be`,
->   then `gcloud services api-keys delete <KEY_ID>` and re-run `npm run secrets:set`
->   (or mint a fresh one and `security add-generic-password -U -s council-of-personas -a LITELLM_API_KEY -w <new-key>`).
+> **Rotating keys.** If you use a Google AI / Gemini key, manage it at
+> [aistudio.google.com/apikey](https://aistudio.google.com/apikey) (or, for a
+> gcloud-minted API key, `gcloud services api-keys list/delete --project=<your-project>`),
+> then re-run `npm run secrets:set` to store the new value. Keychain values take
+> precedence over `.env`.
 
 ### Models & lineage variance
 
@@ -326,20 +322,21 @@ and reads your key from the Keychain/`.env` like everything else.
 ### Hosted (remote, for use anywhere)
 
 The Streamable-HTTP transport (`npm run mcp:http`, or `MCP_HTTP=1`) is containerized
-(`Dockerfile`) and deployed to **Cloud Run** in project `fofoapps-934be`:
+(`Dockerfile`) and deploys to **Cloud Run** (see [Infrastructure](#infrastructure-terraform--cloud-build)).
+Once deployed, your endpoint looks like:
 
 ```
-https://council-mcp-851869525836.us-central1.run.app/mcp
+https://<your-cloud-run-host>/mcp
 ```
 
-It's gated by a **bearer token** (`MCP_BEARER_TOKEN`, stored in Secret Manager as
+Gate it with a **bearer token** (`MCP_BEARER_TOKEN`, stored in Secret Manager as
 `council-mcp-token` and in your Keychain). The Gemini key lives in Secret Manager
 (`council-gemini-key`). Add it to Claude Code from any machine:
 
 ```bash
 TOKEN=$(security find-generic-password -s council-of-personas -a MCP_BEARER_TOKEN -w)
 claude mcp add --transport http council \
-  https://council-mcp-851869525836.us-central1.run.app/mcp \
+  https://<your-cloud-run-host>/mcp \
   --header "Authorization: Bearer $TOKEN"
 ```
 
@@ -359,11 +356,11 @@ still works too — both auth paths are accepted.
 
 ### Infrastructure (Terraform + Cloud Build)
 
-The backend (APIs, Artifact Registry, the four secrets, Cloud Run service + secret
+The backend (APIs, Artifact Registry, the secrets, Cloud Run service + secret
 wiring, IAM, and a push-to-deploy Cloud Build trigger) is codified in
 [`infra/`](infra/) (Terraform) + [`cloudbuild.yaml`](cloudbuild.yaml). See
 [`infra/README.md`](infra/README.md) for apply / import / CI setup. Quick redeploy
-without Terraform: `gcloud run deploy council-mcp --source . --project fofoapps-934be --region us-central1`.
+without Terraform: `gcloud run deploy council-mcp --source . --project your-gcp-project --region us-central1`.
 
 ---
 
@@ -410,7 +407,7 @@ accent colors and live status glows.
 - **No tokens appear** — confirm the API is up (`curl localhost:8787/api/health`) and
   that the Quasar dev server is proxying `/api` (it does by default via `quasar.config.ts`).
 - **`research` did nothing / warned** — set a Tavily key (`TAVILY_API_KEY` or Keychain
-  `tavily-spt-dev`). Research is best-effort: with no/invalid key the run still
+  the Keychain). Research is best-effort: with no/invalid key the run still
   completes ungrounded and the output says so.
 - **A Vertex (Claude) seat 429s** — that base model's Vertex quota is 0; request an
   increase or use a verified lineage. See [Models & grounding](docs/MODELS-AND-GROUNDING.md).

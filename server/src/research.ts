@@ -7,7 +7,6 @@
 // N seats asking the same thing trigger ONE search, not N. Failures are soft:
 // research never aborts a run — a missing key or a Tavily error just means no
 // brief for that query.
-import { execFileSync } from 'node:child_process';
 import { keychainGet } from './secrets';
 import type { GroundingSource } from './llm';
 
@@ -24,30 +23,12 @@ function toSearchQuery(q: string): string {
   return (lastSpace > 200 ? cut.slice(0, lastSpace) : cut).trim();
 }
 
-// macOS Keychain lookup for an arbitrary service+account (the Tavily key is
-// stored under its own service, not the app's shared one).
-function keychainGetSvc(service: string, account: string): string | undefined {
-  if (process.platform !== 'darwin') return undefined;
-  try {
-    const out = execFileSync(
-      'security',
-      ['find-generic-password', '-s', service, '-a', account, '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    const v = out.replace(/\n$/, '');
-    return v.length ? v : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /** Resolve the Tavily API key: env first (prod/Secret Manager), then Keychain. */
 export function resolveTavilyKey(): string | undefined {
   return (
     process.env.TAVILY_API_KEY ||
     process.env.TAVILY_KEY ||
-    keychainGetSvc('tavily-spt-dev', 'tavily-spt-dev') ||
-    keychainGet('TAVILY_API_KEY') || // app-service Keychain fallback
+    keychainGet('TAVILY_API_KEY') || // macOS Keychain (service: council-of-personas)
     undefined
   );
 }

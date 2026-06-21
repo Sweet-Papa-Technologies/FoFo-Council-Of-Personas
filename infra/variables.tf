@@ -1,6 +1,6 @@
 variable "project_id" {
   type        = string
-  description = "GCP project ID (e.g. fofoapps-934be)."
+  description = "GCP project ID (e.g. your-gcp-project)."
 }
 
 variable "region" {
@@ -19,6 +19,12 @@ variable "image" {
   type        = string
   default     = null
   description = "Container image. Defaults to <region>-docker.pkg.dev/<project>/council/council-mcp:latest (shipped by Cloud Build)."
+}
+
+variable "icon_base_url" {
+  type        = string
+  default     = ""
+  description = "Public base URL hosting the MCP server icons (icon-48/128/512.png), e.g. https://storage.googleapis.com/<bucket>/icons. Empty = no icons."
 }
 
 variable "github_owner" {

@@ -1,6 +1,9 @@
-project_id    = "fofoapps-934be"
+project_id    = "your-gcp-project"
 region        = "us-central1"
 council_model = "gemini-3.5-flash"
+
+# Optional: public bucket hosting the MCP server icons (icon-48/128/512.png).
+# icon_base_url = "https://storage.googleapis.com/<your-bucket>/icons"
 
 # Set to enable the Cloud Build push-to-deploy trigger (needs the Cloud Build
 # GitHub App connected to the repo). Leave github_owner empty to skip the trigger.

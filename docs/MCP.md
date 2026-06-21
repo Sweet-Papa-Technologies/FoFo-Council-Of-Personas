@@ -59,7 +59,7 @@ The Streamable-HTTP server (`npm run mcp:http` / `MCP_HTTP=1`) is containerized 
 deployed to Cloud Run:
 
 ```
-https://council-mcp-851869525836.us-central1.run.app/mcp
+https://<your-cloud-run-host>/mcp
 ```
 
 Gated by `MCP_BEARER_TOKEN` (Secret Manager `council-mcp-token`, also in Keychain):
@@ -67,7 +67,7 @@ Gated by `MCP_BEARER_TOKEN` (Secret Manager `council-mcp-token`, also in Keychai
 ```bash
 TOKEN=$(security find-generic-password -s council-of-personas -a MCP_BEARER_TOKEN -w)
 claude mcp add --transport http council \
-  https://council-mcp-851869525836.us-central1.run.app/mcp \
+  https://<your-cloud-run-host>/mcp \
   --header "Authorization: Bearer $TOKEN"
 ```
 
@@ -100,7 +100,7 @@ external session store (Redis/Firestore).
 
 ```bash
 gcloud run deploy council-mcp --source . \
-  --project fofoapps-934be --region us-central1
+  --project your-gcp-project --region us-central1
 ```
 
 Builds from the `Dockerfile` (`tsx`, no build step), ships a new revision. Secrets

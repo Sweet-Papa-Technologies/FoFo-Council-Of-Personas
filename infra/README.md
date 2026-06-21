@@ -1,6 +1,6 @@
 # Infrastructure (Terraform + Cloud Build)
 
-Codifies the Cloud Run MCP backend in project **`fofoapps-934be`**: APIs, Artifact
+Codifies the Cloud Run MCP backend in project **`your-gcp-project`**: APIs, Artifact
 Registry, Secret Manager (containers + IAM), the Cloud Run service (env + secret
 wiring), public invoker, and a Cloud Build trigger that builds + deploys on push.
 
@@ -13,7 +13,7 @@ wiring), public invoker, and a Cloud Build trigger that builds + deploys on push
 Terraform manages the secret *containers* and access; you add the *values*:
 
 ```bash
-P=fofoapps-934be
+P=your-gcp-project
 printf '%s' "<GEMINI_API_KEY>"      | gcloud secrets versions add council-gemini-key       --data-file=- --project $P
 printf '%s' "$(openssl rand -hex 24)" | gcloud secrets versions add council-mcp-token        --data-file=- --project $P
 printf '%s' "$(openssl rand -hex 32)" | gcloud secrets versions add council-oauth-secret     --data-file=- --project $P
@@ -28,9 +28,9 @@ Keychain under service `council-of-personas`.)
 ```bash
 cd infra
 terraform init
-terraform apply -var project_id=fofoapps-934be -var github_owner=Sweet-Papa-Technologies
+terraform apply -var project_id=your-gcp-project -var github_owner=Sweet-Papa-Technologies
 # Then ship an image:
-gcloud builds submit --config ../cloudbuild.yaml --project fofoapps-934be
+gcloud builds submit --config ../cloudbuild.yaml --project your-gcp-project
 terraform output mcp_url
 ```
 
@@ -39,7 +39,7 @@ terraform output mcp_url
 ```bash
 cd infra
 terraform init
-P=fofoapps-934be; R=us-central1
+P=your-gcp-project; R=us-central1
 terraform import -var project_id=$P google_artifact_registry_repository.council projects/$P/locations/$R/repositories/council
 for s in council-gemini-key council-mcp-token council-oauth-secret council-oauth-passphrase; do
   terraform import -var project_id=$P "google_secret_manager_secret.s[\"$s\"]" projects/$P/secrets/$s

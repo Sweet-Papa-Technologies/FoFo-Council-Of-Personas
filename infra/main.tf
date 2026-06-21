@@ -106,6 +106,17 @@ resource "google_cloud_run_v2_service" "council_mcp" {
         name  = "COUNCIL_MODEL"
         value = var.council_model
       }
+      # Project for direct Vertex AI calls (non-Gemini seats). No hardcoded default
+      # in code — supplied here so the runtime SA targets the right project.
+      env {
+        name  = "VERTEX_PROJECT"
+        value = var.project_id
+      }
+      # Public base URL for the MCP server icons (icon-48/128/512.png). Optional.
+      env {
+        name  = "ICON_BASE_URL"
+        value = var.icon_base_url
+      }
       dynamic "env" {
         for_each = local.secret_env
         content {

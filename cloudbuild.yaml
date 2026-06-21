@@ -1,7 +1,7 @@
 # Build the MCP server image and deploy it to the (Terraform-managed) Cloud Run
 # service. Env vars + secrets live on the service via Terraform — this only ships
 # a new image. Run by the Cloud Build trigger on push to main, or manually:
-#   gcloud builds submit --config cloudbuild.yaml --project fofoapps-934be
+#   gcloud builds submit --config cloudbuild.yaml --project your-gcp-project
 substitutions:
   _REGION: us-central1
   _REPO: council

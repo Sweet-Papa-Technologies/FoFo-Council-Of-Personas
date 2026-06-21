@@ -10,10 +10,17 @@
 // Auth is ADC: the Cloud Run runtime SA (roles/aiplatform.user) in prod, or
 // `gcloud auth application-default` locally. No keys to manage.
 import { GoogleAuth } from 'google-auth-library';
+import { keychainGet } from './secrets';
 import type { ChatRequest, ChatResult } from './llm';
 
+// Your GCP project for Vertex calls — from env (set this on Cloud Run / in .env) or
+// the macOS Keychain (service: council-of-personas). No hardcoded default, so the
+// repo stays project-agnostic; a Vertex seat errors clearly if it's unset.
 const VERTEX_PROJECT =
-  process.env.VERTEX_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || 'fofoapps-934be';
+  process.env.VERTEX_PROJECT ||
+  process.env.GOOGLE_CLOUD_PROJECT ||
+  keychainGet('VERTEX_PROJECT') ||
+  '';
 // Claude 4.6 + the MaaS models live on the `global` endpoint.
 const VERTEX_LOCATION = process.env.VERTEX_LOCATION || 'global';
 const ANTHROPIC_VERSION = 'vertex-2023-10-16';
@@ -167,6 +174,11 @@ export function streamVertex(
   req: ChatRequest,
   onDelta: (d: string) => void,
 ): Promise<ChatResult> {
+  if (!VERTEX_PROJECT) {
+    return Promise.reject(
+      new Error('Vertex seat configured but VERTEX_PROJECT is not set (env, GOOGLE_CLOUD_PROJECT, or Keychain).'),
+    );
+  }
   return kind === 'anthropic'
     ? streamAnthropic(modelId, req, onDelta)
     : streamVertexOpenAI(modelId, req, onDelta);

@@ -23,10 +23,10 @@ npm run secrets:clear   # remove from the Keychain (.env untouched)
 | LLM API key | **yes** | `GEMINI_API_KEY`, `LLM_API_KEY`, `LITELLM_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY` | Sent as `Authorization: Bearer <key>`. A free Gemini key (`AIza…`) is the easy path. |
 | Base URL | no | `LLM_BASE_URL`, `LITELLM_BASE_URL`, `OPENAI_BASE_URL` | Any OpenAI-compatible endpoint. Defaults to Gemini (`…/v1beta/openai`) when only a key is set. |
 | Council model | no | `COUNCIL_MODEL`, `LLM_MODEL` | Default model for council members (the "medium" tier). Defaults to `gemini-2.5-flash`. |
-| **Tavily key** | no | `TAVILY_API_KEY`, `TAVILY_KEY` | Enables the provider-agnostic `research` grounding. Also resolved from the Keychain service **`tavily-spt-dev`**. See [grounding](MODELS-AND-GROUNDING.md#research-tavily). |
+| **Tavily key** | no | `TAVILY_API_KEY`, `TAVILY_KEY` | Enables the provider-agnostic `research` grounding. Set via env or the Keychain (service `council-of-personas`) with `npm run secrets:set`. See [grounding](MODELS-AND-GROUNDING.md#research-tavily). |
 | `PORT` | no | — | API/MCP port (default `8787` API, `8788` MCP HTTP). |
 | `COUNCIL_CONFIG` | no | — | Path to the roster file (default `./council.yaml`). |
-| `VERTEX_PROJECT` | no | — | GCP project for Vertex model calls (default `fofoapps-934be` / `GOOGLE_CLOUD_PROJECT`). |
+| `VERTEX_PROJECT` | no | — | Your GCP project for Vertex model calls. Resolved from env, `GOOGLE_CLOUD_PROJECT`, or the Keychain (service `council-of-personas`) — no hardcoded default. |
 | `VERTEX_LOCATION` | no | — | Vertex location (default `global`). |
 | `MCP_HTTP` | no | — | `1` serves the MCP server over Streamable HTTP instead of stdio. |
 | `MCP_BEARER_TOKEN` | no | — | Static bearer that gates the hosted MCP endpoint (Claude Code). |
