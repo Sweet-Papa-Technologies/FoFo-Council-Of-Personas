@@ -40,6 +40,7 @@ locals {
     "council-mcp-token",
     "council-oauth-secret",
     "council-oauth-passphrase",
+    "council-tavily-key",
   ]
 
   # env var name -> secret id
@@ -48,6 +49,7 @@ locals {
     MCP_BEARER_TOKEN  = "council-mcp-token"
     OAUTH_HMAC_SECRET = "council-oauth-secret"
     OAUTH_PASSPHRASE  = "council-oauth-passphrase"
+    TAVILY_API_KEY    = "council-tavily-key"
   }
 }
 

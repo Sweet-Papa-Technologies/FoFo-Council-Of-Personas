@@ -35,10 +35,14 @@ interface CouncilResult {
   rankings: { rank: number; name: string; points: number; appearances: number }[];
 }
 
+// Optional progress reporter: (progress, total|undefined, message).
+type ProgressFn = (progress: number, total: number | undefined, message: string) => void;
+
 // Run the council and collect its streamed events into a structured result.
 async function convene(
   question: string,
   opts: { peerReview?: boolean; search?: boolean; research?: boolean },
+  hooks: { signal?: AbortSignal; onProgress?: ProgressFn } = {},
 ): Promise<CouncilResult> {
   const members = new Map<number, Member>();
   let chairman = '';
@@ -49,6 +53,12 @@ async function convene(
   let chairmanSources: Source[] = [];
   let fatal: string | null = null;
 
+  // Progress accounting: advisors + devil's advocate + chairman.
+  const report = hooks.onProgress;
+  let total: number | undefined;
+  let seatCount = 0;
+  let doneSeats = 0;
+
   const emit: Emit = (event, data) => {
     const d = data as Record<string, any>;
     switch (event) {
@@ -56,15 +66,33 @@ async function convene(
         for (const m of d.members as Record<string, any>[]) {
           members.set(m.id, { id: m.id, name: m.name, label: m.label, answer: '', error: null, sources: [] });
         }
+        seatCount = members.size;
+        total = seatCount + 2; // + devil's advocate + chairman
+        report?.(0, total, `Dispatching ${seatCount} advisors…`);
         break;
-      case 'member_done': { const m = members.get(d.id); if (m) m.answer = d.content; break; }
+      case 'stage':
+        if (d.stage === 'research') report?.(0, total, 'Researching (live web)…');
+        else if (d.stage === 'review') report?.(doneSeats, total, 'Peer review running…');
+        else if (d.stage === 'chairman' && total) report?.(total - 1, total, 'Chairman synthesizing…');
+        break;
+      case 'member_done': {
+        const m = members.get(d.id); if (m) m.answer = d.content;
+        doneSeats++; report?.(doneSeats, total, `Advisor ${doneSeats}/${seatCount} returned`);
+        break;
+      }
       case 'member_error': { const m = members.get(d.id); if (m) m.error = d.error; break; }
       case 'member_sources': { const m = members.get(d.id); if (m) m.sources = d.sources || []; break; }
       case 'ranking_tally': tally = d.tally; break;
-      case 'devils_advocate_done': dissent = d.content; break;
+      case 'devils_advocate_done':
+        dissent = d.content;
+        if (total) report?.(total - 1, total, "Devil's Advocate challenged the consensus");
+        break;
       case 'devils_advocate_error': dissentError = d.error; break;
       case 'chairman_sources': chairmanSources = d.sources || []; break;
-      case 'chairman_done': chairman = d.content; break;
+      case 'chairman_done':
+        chairman = d.content;
+        if (total) report?.(total, total, 'Done');
+        break;
       case 'chairman_error': chairmanError = d.error; break;
       case 'fatal': fatal = d.error; break;
     }
@@ -74,7 +102,7 @@ async function convene(
   if (typeof opts.peerReview === 'boolean') runOpts.peerReview = opts.peerReview;
   if (typeof opts.search === 'boolean') runOpts.searchAll = opts.search;
   if (typeof opts.research === 'boolean') runOpts.research = opts.research;
-  await runCouncil(question, emit, new AbortController().signal, runOpts);
+  await runCouncil(question, emit, hooks.signal ?? new AbortController().signal, runOpts);
   if (fatal) throw new Error(fatal);
 
   const list = [...members.values()];
@@ -237,9 +265,30 @@ function buildServer(): McpServer {
         output_format: z.enum(['markdown', 'json', 'html']).optional().describe('markdown (default) | json (structured per-seat objects for the agent to render itself) | html (self-contained, collapsible, no scripts).'),
       },
     },
-    async ({ question, peer_review, web_search, research, summary_only, output_format }) => {
+    async ({ question, peer_review, web_search, research, summary_only, output_format }, extra) => {
       const fmt = output_format ?? 'markdown';
       const summary = summary_only ?? false;
+
+      // F2: forward per-stage progress to clients that asked for it (degrade
+      // gracefully — a client that sent no progressToken just gets nothing).
+      const progressToken = extra?._meta?.progressToken;
+      const onProgress: ProgressFn | undefined =
+        progressToken === undefined
+          ? undefined
+          : (progress, totalSteps, message) => {
+              void extra
+                .sendNotification({
+                  method: 'notifications/progress',
+                  params: {
+                    progressToken,
+                    progress,
+                    message,
+                    ...(typeof totalSteps === 'number' ? { total: totalSteps } : {}),
+                  },
+                })
+                .catch(() => {}); // never let progress break the run
+            };
+
       try {
         const q = (question ?? '').trim();
         if (!q) {
@@ -253,7 +302,10 @@ function buildServer(): McpServer {
         if (typeof web_search === 'boolean') opts.search = web_search;
         if (typeof research === 'boolean') opts.research = research;
 
-        const result = await convene(q, opts);
+        const hooks: { signal?: AbortSignal; onProgress?: ProgressFn } = {};
+        if (extra?.signal) hooks.signal = extra.signal;
+        if (onProgress) hooks.onProgress = onProgress;
+        const result = await convene(q, opts, hooks);
 
         // Partial-failure visibility: if every seat AND the chairman failed, treat
         // the run as an error so the agent doesn't act on an empty result.
