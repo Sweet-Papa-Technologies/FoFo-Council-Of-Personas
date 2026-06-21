@@ -241,8 +241,22 @@ function renderHtml(r: CouncilResult, summaryOnly: boolean): string {
   );
 }
 
+const ICON_BASE = 'https://storage.googleapis.com/fofoapps-934be-council-assets/icons';
+const ICONS = [
+  { src: `${ICON_BASE}/icon-48.png`, mimeType: 'image/png', sizes: ['48x48'] },
+  { src: `${ICON_BASE}/icon-128.png`, mimeType: 'image/png', sizes: ['128x128'] },
+  { src: `${ICON_BASE}/icon-512.png`, mimeType: 'image/png', sizes: ['512x512'] },
+];
+
 function buildServer(): McpServer {
-  const server = new McpServer({ name: 'council-of-personas', version: '0.1.0' });
+  const server = new McpServer({
+    name: 'council-of-personas',
+    version: '0.1.0',
+    title: 'Council of Personas',
+    description: 'A council of adversarial AI advisors that debate, peer-review, and synthesize a recommendation.',
+    websiteUrl: 'https://github.com/Sweet-Papa-Technologies/FoFo-Council-Of-Personas',
+    icons: ICONS,
+  });
 
   server.registerTool(
     'convene_council',
