@@ -4,10 +4,11 @@
 
 <p>
   <a href="#quick-start"><b>Quick start</b></a> ·
-  <a href="#use-it-as-a-claude-skill-headless-no-web-ui"><b>Claude Skill</b></a> ·
-  <a href="#configuration--env-vars"><b>Config</b></a> ·
-  <a href="#editing-the-council-councilyaml"><b>Personas</b></a> ·
-  <a href="docs/BRANDING.md"><b>Branding</b></a>
+  <a href="#the-pipeline"><b>Pipeline</b></a> ·
+  <a href="docs/CONFIGURATION.md"><b>Config</b></a> ·
+  <a href="docs/MODELS-AND-GROUNDING.md"><b>Models &amp; grounding</b></a> ·
+  <a href="docs/MCP.md"><b>MCP</b></a> ·
+  <a href="docs/COST-ANALYSIS.md"><b>Cost</b></a>
 </p>
 
 <p>
@@ -16,27 +17,33 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-bcc3ff?style=flat-square" />
   <img alt="Backend: Hono" src="https://img.shields.io/badge/api-Hono-7c3aed?style=flat-square" />
   <img alt="Frontend: Quasar" src="https://img.shields.io/badge/ui-Quasar%20%C2%B7%20Vue%203-57e0a8?style=flat-square" />
-  <img alt="Models: Gemini" src="https://img.shields.io/badge/models-Gemini-ffd479?style=flat-square" />
+  <img alt="Models: Gemini + Vertex" src="https://img.shields.io/badge/models-Gemini%20%2B%20Vertex%20(multi--lineage)-ffd479?style=flat-square" />
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-7c3aed?style=flat-square" />
 </p>
 
 </div>
 
-Ask one question. A **council of advisors** — all the *same* underlying model, each
-with a different system prompt — answer **in parallel**, **critique and rank** each
-other, and a **Chairman** synthesizes the final answer.
+Ask one question. A **council of advisors** — each with a different system prompt,
+optionally on **different model lineages** — answer **in parallel**, **critique and
+rank** each other, a **Devil's Advocate** attacks wherever they converge, and a
+**Chairman** synthesizes the final answer with a confidence/cruxes calibration.
 
 The point is *spread*: four genuinely adversarial seats (a skeptic, a visionary, a
 pragmatist, a domain expert) run hot (temp ~0.9) so they disagree, then a cold
-(temp ~0.3) Chairman reconciles them.
+(temp ~0.3) Chairman reconciles them. Seats can run on **different base models**
+(Gemini + Claude/DeepSeek/… via Vertex) so a "unanimous" verdict isn't just one
+model echoing itself, and the whole council can **ground in live web facts**.
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│  Q ──► Red Team ┐                                          │
-│        Visionary├─ fan-out (parallel, streamed live)       │
-│        Operator ├─ peer review (anonymized cross-ranking)  │
-│        Expert   ┘                                          │
-│                    └──► Chairman ──► synthesis (pinned top) │
-└──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│  Q ─► (optional: one shared web-research brief — Tavily)            │
+│        Red Team ┐                                                   │
+│        Visionary├─ fan-out (parallel, streamed live)                │
+│        Operator ├─ peer review (anonymized cross-ranking)           │
+│        Expert   ┘                                                   │
+│                 └─► Devil's Advocate (attacks the consensus)        │
+│                          └─► Chairman ─► synthesis (pinned top)     │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 <div align="center">
@@ -44,11 +51,14 @@ pragmatist, a domain expert) run hot (temp ~0.9) so they disagree, then a cold
 </div>
 
 - **Backend** — Node + TypeScript + [Hono](https://hono.dev), streaming over SSE.
-  Model calls hit any **OpenAI-compatible** `chat/completions` endpoint.
+  Model calls hit any **OpenAI-compatible** endpoint, **Gemini native**, or
+  **Vertex AI** (Claude / DeepSeek / Qwen / …) — see [Models & grounding](docs/MODELS-AND-GROUNDING.md).
 - **Frontend** — the Quasar (Vue 3) SPA in `app/`, a dark "command station" UI.
-- **Config-driven** — edit `council.yaml` to change the roster. No code changes.
-- **Two front-ends, one engine** — the same council runs as a [headless CLI / Claude
-  skill](#use-it-as-a-claude-skill-headless-no-web-ui), no browser required.
+- **Config-driven** — edit `council.yaml` to change the roster, models, and
+  grounding. No code changes. Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+- **Three front-ends, one engine** — the web UI, a [headless CLI / Claude
+  skill](#use-it-as-a-claude-skill-headless-no-web-ui), and an [MCP server](docs/MCP.md)
+  (Claude Code, Claude Desktop, claude.ai web) all run the same council.
 
 > **Do I need a LiteLLM proxy? No.** The app talks to any OpenAI-compatible endpoint.
 > The simplest setup is a **free Gemini API key** and nothing else — the app defaults
@@ -92,16 +102,19 @@ and watch the council answer in parallel → cross-rank → Chairman synthesis o
 
 ## Configuration / env vars
 
-Only an **API key** is truly required. Each row lists the accepted names (any one works).
+Only an **API key** is truly required. The most-used vars are below; the **full
+reference** (every env var, all of `council.yaml`, and the per-run override
+precedence) is in **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)**.
 
 | Setting | Required | Env names (any) | Meaning |
 |---------|----------|-----------------|---------|
 | API key | **yes** | `GEMINI_API_KEY`, `LLM_API_KEY`, `LITELLM_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY` | Sent as `Authorization: Bearer <key>`. A free Gemini key (`AIza…`) is the easy path. |
-| Base URL | no | `LLM_BASE_URL`, `LITELLM_BASE_URL`, `OPENAI_BASE_URL` | Any OpenAI-compatible endpoint. **Defaults to Gemini** (`…/v1beta/openai`) when only a key is set. `https://host`, `https://host/v1`, and the Gemini base all normalize correctly. |
-| Model | no | `COUNCIL_MODEL`, `LLM_MODEL` | Default model for the **council members** (the "medium" tier). Defaults to `gemini-2.5-flash`. Peer review + Chairman have their own tiers (below). A seat can override `model` in `council.yaml`. |
+| Base URL | no | `LLM_BASE_URL`, `LITELLM_BASE_URL`, `OPENAI_BASE_URL` | Any OpenAI-compatible endpoint. **Defaults to Gemini** (`…/v1beta/openai`) when only a key is set. |
+| Model | no | `COUNCIL_MODEL`, `LLM_MODEL` | Default model for the **council members** (the "medium" tier). Defaults to `gemini-2.5-flash`. A seat can override `model` in `council.yaml` (incl. non-Gemini lineages — see [Models](docs/MODELS-AND-GROUNDING.md)). |
+| **Tavily key** | no | `TAVILY_API_KEY` (or Keychain `tavily-spt-dev`) | Enables the provider-agnostic `research` grounding for every seat + Chairman. |
 | `PORT` | no | — | API port (default `8787`). |
 | `COUNCIL_CONFIG` | no | — | Path to the roster file (default `./council.yaml`). |
-| `API_TARGET` | no | — | Override the target the Quasar dev server forwards `/api` to. |
+| `VERTEX_PROJECT` / `VERTEX_LOCATION` | no | — | GCP project / location for Vertex seats (defaults `fofoapps-934be` / `global`). |
 
 ### Where secrets come from
 
@@ -128,39 +141,37 @@ so `.env` is the portable path for teammates who don't use macOS.
 >   then `gcloud services api-keys delete <KEY_ID>` and re-run `npm run secrets:set`
 >   (or mint a fresh one and `security add-generic-password -U -s council-of-personas -a LITELLM_API_KEY -w <new-key>`).
 
-### Model tiers
+### Models & lineage variance
 
-The council uses three Gemini tiers, matched to how hard each stage is:
+Three Gemini tiers by default, matched to how hard each stage is:
 
-| Stage | Tier | Model | Where it's set |
-|-------|------|-------|----------------|
-| Council members | medium | `gemini-3.5-flash` | `COUNCIL_MODEL` (Keychain/env) |
-| Peer review | fast | `gemini-3.1-flash-lite` | `settings.review_model` in `council.yaml` |
-| Chairman | hard | `gemini-3.1-pro-preview` | `chairman.model` in `council.yaml` |
+| Stage | Tier | Default model |
+|-------|------|-------|
+| Council members | medium | `gemini-3.5-flash` (`COUNCIL_MODEL`) |
+| Peer review + Devil's Advocate | fast | `gemini-3.1-flash-lite` (`settings.review_model`) |
+| Chairman | hard | `gemini-3.1-pro-preview` (`chairman.model`) |
 
-These are the **defaults**. You can also pick a model per role live in the UI —
-**Global Settings → Models** has a dropdown for each tier (populated from the
-provider's model list via `GET /api/models`), with **Reset to defaults** to revert.
-UI picks are saved in your browser and sent per-run; they never touch `council.yaml`.
+A seat can run on a **different base-model lineage** so "agreement" means something —
+just set its `model:` to a Vertex model (`vertex:anthropic:…` for Claude,
+`vertex:openai:…` for DeepSeek/Qwen/Llama/…). The default roster runs the **Domain
+Expert on DeepSeek V3.2**. UI dropdowns (Global Settings → Models, with **Reset to
+defaults**) pick per-role models live. **Full details — schemes, the verified lineage
+menu, enabling models, the Claude quota note, and ADC/IAM — in
+[docs/MODELS-AND-GROUNDING.md](docs/MODELS-AND-GROUNDING.md).**
 
-To change the defaults themselves, edit `council.yaml` (or `COUNCIL_MODEL`) — no code
-changes. A single seat can also pin its own `model:` to override the council default.
+### Grounding (live web facts)
 
-### Web search (live grounding)
+Two independent mechanisms (either/both):
 
-Any seat can research with **live Google Search grounding** (Gemini-native), so its
-answer is backed by current facts instead of training-cutoff knowledge — and the web
-**sources it used are shown** under that advisor's card (and in the CLI/JSON output).
-Each advisor searches independently.
+- **Native search** (Gemini) — per-seat `search: true`, `settings.web_search`, the UI
+  toggles, or CLI `--search`. Sources show under each advisor's card. Gemini seats only.
+- **Research** (Tavily) — **provider-agnostic**: one LLM-distilled query → one cached
+  search → a shared brief injected into **every advisor, the Devil's Advocate, and the
+  Chairman**, so non-Gemini seats and the synthesis layer ground from the same
+  evidence. Best-effort (never aborts a run). Enable with `settings.research`, MCP
+  `research`, or CLI `--research`; needs a Tavily key.
 
-- **Per seat in `council.yaml`:** add `search: true` to a persona (the Domain Expert
-  ships with it on). Set a global default with `settings.web_search: true`.
-- **Live in the UI:** Global Settings → **Web search** toggles each seat (and the
-  Chairman) per run; saved in your browser.
-- **CLI:** `--search` turns it on for every seat, `--no-search` forces it off.
-
-> Grounding uses Gemini's native API automatically when the endpoint is Gemini; on
-> other OpenAI-compatible providers seats fall back to ungrounded answers.
+See [docs/MODELS-AND-GROUNDING.md#grounding](docs/MODELS-AND-GROUNDING.md#grounding).
 
 ### Attachments
 
@@ -184,18 +195,26 @@ curl -s localhost:8787/api/health | jq
 
 ---
 
-## The three stages
+## The pipeline
 
+0. **Research** (optional, `research`) — one LLM-distilled query → one cached Tavily
+   search → a shared brief grounding every role. Best-effort; never aborts the run.
 1. **Fan-out** — the question goes to every seat in parallel (`Promise.all`); each
-   response streams into its own card as it arrives. **If one seat errors, its card
-   shows the error and the run continues** — a single failure never sinks the run.
-2. **Peer review** (toggle `settings.peer_review`, default on) — each seat receives the
-   *other* seats' answers with identities anonymized (`Advisor A/B/C…`), critiques and
-   ranks them, ending with a strict `FINAL RANKING:` block that the server parses into a
-   Borda-style tally.
-3. **Chairman** — one cold-temperature synthesizer call receives all answers (and the
-   ranking tally, if stage 2 ran) and produces the final answer, pinned at the top with
-   the council collapsible below.
+   response streams into its own card. **If a seat errors or returns empty, it's
+   retried once, then marked failed and the run continues** — a single failure never
+   sinks the run, and an empty answer is never shipped as a real one.
+2. **Peer review** (`settings.peer_review`, default on) — each seat receives the
+   *other* seats' answers anonymized (`Advisor A/B/C…`), critiques and ranks them with a
+   strict `FINAL RANKING:` block parsed into a Borda-style tally. Failed seats are
+   excluded.
+3. **Devil's Advocate** (`settings.devils_advocate`, default on) — a cold pass finds
+   where the council is converging and argues the strongest case against it (anti-framing
+   guard), surfacing the crux. Its dissent is fed to the Chairman.
+4. **Chairman** — one cold synthesizer call receives all answers, the ranking, and the
+   dissent, and produces the final answer (Consensus / Conflicts / Blind Spots /
+   Recommendation / Next Step / **Confidence & Cruxes**). It must flag any override of a
+   higher-ranked advisor and must not call an incomplete panel "unanimous". Pinned on
+   top, council collapsible below.
 
 ---
 
@@ -226,13 +245,17 @@ Global knobs under `settings:`:
 
 ```yaml
 settings:
-  peer_review: true          # turn stage 2 on/off
+  peer_review: true          # stage 2 (anonymized cross-ranking)
+  devils_advocate: true      # standing anti-framing dissent stage
+  research: false            # provider-agnostic Tavily grounding (needs a key)
+  web_search: false          # default native (Gemini) grounding for seats
   council_temperature: 0.9   # seats run hot for spread
   chairman_temperature: 0.3  # chairman runs cold for consistency
 ```
 
-The `chairman:` block has the same shape as a seat and supports the same `model` /
-`temperature` overrides.
+The `chairman:` block — and an optional `devils_advocate:` block — have the same
+shape as a seat and support the same `model` / `temperature` overrides. See the full
+`council.yaml` reference in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ---
 
@@ -250,11 +273,14 @@ npm run council -- "Should we migrate from Jest to Vitest?"
 # Structured JSON for programmatic use
 npm run council -- "Should we migrate from Jest to Vitest?" --json
 
-# Faster: skip peer review
-npm run council -- "..." --no-review
+# Faster: skip peer review and/or the Devil's Advocate
+npm run council -- "..." --no-review --no-devil
 
-# Ground every seat with live web search (Gemini)
+# Ground every seat with live native search (Gemini)
 npm run council -- "Best React state library right now?" --search
+
+# Or provider-agnostic grounding (Tavily) — works for non-Gemini seats too
+npm run council -- "Best React state library right now?" --research
 ```
 
 Progress prints to **stderr**; the result prints to **stdout**, so it captures cleanly.
@@ -280,8 +306,15 @@ with the Chairman's recommendation and offers the individual advisors' arguments
 ## Use it from Claude via MCP
 
 The council is also an **MCP server** (`server/src/mcp.ts`), so an AI client can call
-it as a tool. It exposes one tool — **`convene_council`** (`question`, optional
-`peer_review`, `web_search`) — returning the Markdown report.
+it as a tool. One tool — **`convene_council`** — with params `question`,
+`peer_review`, `web_search`, `research`, `summary_only`, and
+`output_format` (`markdown` | `json` | `html`). It streams **progress
+notifications** per stage and returns structured errors. **Full tool reference,
+output formats, and the stateless design in [docs/MCP.md](docs/MCP.md).**
+
+> **Deploys don't break the connector.** The HTTP server runs in **stateless** mode,
+> so a new Cloud Run revision (or instance recycle) serves any request without a
+> reconnect — stale sessions are ignored rather than rejected. (Details in the MCP doc.)
 
 ### Claude Code / Claude Desktop (local, no hosting)
 
@@ -344,8 +377,12 @@ scripts/install-skill.sh   install the skill into ~/.claude/skills
 server/src/
   index.ts            Hono server + SSE endpoint
   cli.ts              headless CLI (Markdown / JSON) — used by the skill
-  council.ts          3-stage orchestration
-  llm.ts              streaming OpenAI-compatible client
+  mcp.ts              MCP server (stdio + stateless Streamable HTTP)
+  oauth.ts            minimal OAuth 2.1 AS (claude.ai custom connector)
+  council.ts          pipeline: fan-out → review → devil's advocate → chairman
+  llm.ts              streaming client (OpenAI-compat + Gemini native + Vertex routing)
+  vertex.ts           direct Vertex AI provider (Claude / DeepSeek / Qwen / …)
+  research.ts         Tavily research (provider-agnostic grounding)
   config.ts           env/Keychain + council.yaml loading
   secrets.ts          Keychain → env resolution
   queue.ts            single-consumer async queue (serializes SSE writes)
@@ -371,6 +408,24 @@ accent colors and live status glows.
   synthesizes from the seats that answered.
 - **No tokens appear** — confirm the API is up (`curl localhost:8787/api/health`) and
   that the Quasar dev server is proxying `/api` (it does by default via `quasar.config.ts`).
+- **`research` did nothing / warned** — set a Tavily key (`TAVILY_API_KEY` or Keychain
+  `tavily-spt-dev`). Research is best-effort: with no/invalid key the run still
+  completes ungrounded and the output says so.
+- **A Vertex (Claude) seat 429s** — that base model's Vertex quota is 0; request an
+  increase or use a verified lineage. See [Models & grounding](docs/MODELS-AND-GROUNDING.md).
+
+---
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Every env var, all of `council.yaml`, per-run override precedence |
+| [docs/MODELS-AND-GROUNDING.md](docs/MODELS-AND-GROUNDING.md) | Model tiers, Vertex lineage variance + setup, native search, Tavily research |
+| [docs/MCP.md](docs/MCP.md) | The `convene_council` tool, output formats, progress, connecting (stdio/bearer/OAuth), stateless design, deploy |
+| [docs/COST-ANALYSIS.md](docs/COST-ANALYSIS.md) | Measured per-run cost, pricing-for-viability, cost monitoring |
+| [infra/README.md](infra/README.md) | Terraform apply / import / CI |
+| [docs/BRANDING.md](docs/BRANDING.md) | Logo / palette / asset generation |
 
 ---
 
