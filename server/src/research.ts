@@ -57,6 +57,8 @@ export class ResearchSession {
   private key: string | undefined;
   private cache = new Map<string, Promise<ResearchBrief | null>>();
   private maxResults: number;
+  /** Last error from a failed search (invalid key, quota, network) — for surfacing. */
+  lastError: string | null = null;
 
   constructor(opts: { maxResults?: number } = {}) {
     this.key = resolveTavilyKey();
@@ -67,14 +69,15 @@ export class ResearchSession {
     return !!this.key;
   }
 
-  /** Search (cached by normalized query). Returns null on any failure. */
+  /** Search (cached by normalized query). Returns null on any failure (see lastError). */
   brief(query: string, signal?: AbortSignal): Promise<ResearchBrief | null> {
     const norm = query.trim().slice(0, 400).toLowerCase();
     const existing = this.cache.get(norm);
     if (existing) return existing;
     const p = this.fetchBrief(query, signal).catch((err) => {
+      this.lastError = err instanceof Error ? err.message : String(err);
       // eslint-disable-next-line no-console
-      console.error('[research] tavily error:', err instanceof Error ? err.message : String(err));
+      console.error('[research] tavily error:', this.lastError);
       return null;
     });
     this.cache.set(norm, p);

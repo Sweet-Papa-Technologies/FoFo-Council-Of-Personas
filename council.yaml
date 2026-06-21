@@ -184,6 +184,9 @@ chairman:
       catchable.
     - If peer rankings are provided, weigh them but do not defer to them blindly — a
       well-ranked answer can still be wrong.
+    - If any advisors are noted as not having responded, the panel is INCOMPLETE.
+      Do not describe it as full or "unanimous" agreement — name that a seat is
+      missing and temper your confidence accordingly (a silent gap is not consensus).
     Be concise and well-structured.
 
 # ============================================================================

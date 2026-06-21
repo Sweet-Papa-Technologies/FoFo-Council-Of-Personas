@@ -28,6 +28,7 @@ interface CouncilResult {
   question: string;
   chairman: { content: string; error: string | null; sources: Source[] };
   devils_advocate: { content: string; error: string | null } | null;
+  research: { ran: boolean; sources: Source[]; note: string | null } | null;
   members: {
     name: string; label: string; status: 'ok' | 'error';
     answer: string; error: string | null; grounded: boolean; sources: Source[];
@@ -51,6 +52,7 @@ async function convene(
   let dissentError: string | null = null;
   let tally: TallyRow[] = [];
   let chairmanSources: Source[] = [];
+  let research: { ran: boolean; sources: Source[]; note: string | null } | null = null;
   let fatal: string | null = null;
 
   // Progress accounting: advisors + devil's advocate + chairman.
@@ -83,6 +85,9 @@ async function convene(
       case 'member_error': { const m = members.get(d.id); if (m) m.error = d.error; break; }
       case 'member_sources': { const m = members.get(d.id); if (m) m.sources = d.sources || []; break; }
       case 'ranking_tally': tally = d.tally; break;
+      case 'research_done': research = { ran: true, sources: d.sources || [], note: null }; break;
+      case 'research_error': research = { ran: false, sources: [], note: d.reason || 'research failed' }; break;
+      case 'research_skipped': research = { ran: false, sources: [], note: d.reason || 'research skipped' }; break;
       case 'devils_advocate_done':
         dissent = d.content;
         if (total) report?.(total - 1, total, "Devil's Advocate challenged the consensus");
@@ -110,6 +115,7 @@ async function convene(
     question,
     chairman: { content: chairman, error: chairmanError, sources: chairmanSources },
     devils_advocate: dissent || dissentError ? { content: dissent || '', error: dissentError } : null,
+    research,
     members: list.map((m) => ({
       name: m.name, label: m.label, status: (m.error ? 'error' : 'ok') as 'ok' | 'error',
       answer: m.answer, error: m.error, grounded: m.sources.length > 0, sources: m.sources,
@@ -120,11 +126,28 @@ async function convene(
 
 const srcLine = (s: Source[]) => s.map((x) => `[${x.title}](${x.uri})`).join(' · ');
 
+// Keep the H1 short — the full question goes in its own line / the json `question`
+// field, never inlined into a heading (it breaks html/json headers).
+const shortQ = (q: string) => {
+  const oneLine = q.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 90 ? `${oneLine.slice(0, 90).trim()}…` : oneLine;
+};
+
+// One-line, honest indicator of whether live grounding actually fired.
+function researchLine(r: CouncilResult): string | null {
+  if (!r.research) return null;
+  if (r.research.ran) return `🔎 Research: live web grounding fired — ${r.research.sources.length} shared source(s).`;
+  return `⚠️ Research: did NOT ground — ${r.research.note ?? 'unavailable'}.`;
+}
+
 // ---- Output formatters -------------------------------------------------------
 
 function renderMarkdown(r: CouncilResult, summaryOnly: boolean): string {
   const L: string[] = [];
-  L.push(`# Council of Personas — "${r.question}"`, '');
+  L.push(`# Council of Personas — “${shortQ(r.question)}”`, '');
+  L.push(`**Question:** ${r.question.replace(/\s+/g, ' ').trim()}`, '');
+  const rl = researchLine(r);
+  if (rl) L.push(rl, '');
   L.push("## ⚖️ Chairman's Synthesis", '');
   L.push(r.chairman.error ? `⚠️ ${r.chairman.error}` : (r.chairman.content || '_(none)_'), '');
   if (r.chairman.sources.length) L.push(`🔎 ${srcLine(r.chairman.sources)}`, '');
@@ -229,11 +252,13 @@ function renderHtml(r: CouncilResult, summaryOnly: boolean): string {
 .${P}-src,.${P}-meta{font-size:.8rem;opacity:.7;margin-top:.6em}
 .${P}-err{color:#ff6b6b}
 `;
+  const rl = researchLine(r);
   return (
     `<style>${css}</style>` +
     `<div class="${P}">` +
-    `<h1>Council of Personas</h1>` +
-    `<p class="${P}-meta">${esc(r.question)}</p>` +
+    `<h1>Council of Personas — “${esc(shortQ(r.question))}”</h1>` +
+    `<p class="${P}-meta"><strong>Question:</strong> ${esc(r.question.replace(/\s+/g, ' ').trim())}</p>` +
+    (rl ? `<p class="${P}-meta">${esc(rl)}</p>` : '') +
     `<section class="${P}-hero"><h2>⚖️ Chairman's Synthesis</h2>${chair}${chairSrc}${ranking ? '<h3>Peer ranking</h3>' + ranking : ''}</section>` +
     da +
     (advisors ? `<h2>The Council</h2>${advisors}` : '') +

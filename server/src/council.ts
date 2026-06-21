@@ -68,29 +68,43 @@ async function runSeat(
   signal: AbortSignal,
 ): Promise<SeatResult> {
   emit('member_start', { id });
-  try {
-    const { text: content, sources } = await streamChat(
-      conn,
-      {
-        model: persona.model ?? defaultModel,
-        system: persona.system_prompt,
-        user: question,
-        temperature: tempFor(persona, cfg.settings.council_temperature),
-        search,
-        attachments,
-        signal,
-      },
-      (delta) => emit('member_token', { id, delta }),
-    );
-    const allSources = mergeSources(sources, researchSources);
-    if (allSources.length) emit('member_sources', { id, sources: allSources });
-    emit('member_done', { id, content });
-    return { id, name: persona.name, label, ok: true, content };
-  } catch (err) {
-    const error = err instanceof Error ? err.message : String(err);
+  const request = {
+    model: persona.model ?? defaultModel,
+    system: persona.system_prompt,
+    user: question,
+    temperature: tempFor(persona, cfg.settings.council_temperature),
+    search,
+    attachments,
+    signal,
+  };
+  // A seat occasionally streams nothing (refusal / hot-temp no-op) or hits a
+  // transient upstream error — common on the MaaS lineages. An empty answer is a
+  // FAILURE for an adversarial seat, not agreement. So retry ONCE on empty-or-error,
+  // then mark the seat failed so it's excluded from peer review + ranking and the
+  // Chairman treats it as a missing voice rather than silent consensus.
+  let content = '';
+  let sources: GroundingSource[] = [];
+  let lastError = '';
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const r = await streamChat(conn, request, (delta) => emit('member_token', { id, delta }));
+      if (r.text.trim()) { content = r.text; sources = r.sources; lastError = ''; break; }
+      lastError = 'empty response';
+    } catch (err) {
+      if (signal.aborted) throw err; // client disconnected — don't retry
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+    if (attempt === 1) emit('member_retry', { id, reason: lastError });
+  }
+  if (!content.trim()) {
+    const error = `Failed after one retry: ${lastError || 'empty response'}.`;
     emit('member_error', { id, error });
     return { id, name: persona.name, label, ok: false, content: '', error };
   }
+  const allSources = mergeSources(sources, researchSources);
+  if (allSources.length) emit('member_sources', { id, sources: allSources });
+  emit('member_done', { id, content });
+  return { id, name: persona.name, label, ok: true, content };
 }
 
 // ---- Stage 2: peer review ----------------------------------------------------
@@ -375,22 +389,34 @@ export async function runCouncil(
     : question;
 
   // Provider-agnostic grounding: one shared research brief for every role, so
-  // non-Gemini seats and the Chairman ground from the same evidence. Soft-fails.
+  // non-Gemini seats and the Chairman ground from the same evidence. When research
+  // is EXPLICITLY requested for the run, a missing/invalid key or a failed search
+  // is a HARD ERROR (never a silent no-op) — "grounded" must mean grounded. A
+  // config-default enable degrades soft.
+  const researchExplicit = opts.research === true;
   const researchEnabled = opts.research ?? cfg.settings.research;
   let briefText = '';
   let briefSources: GroundingSource[] = [];
   if (researchEnabled) {
     const session = new ResearchSession();
-    if (session.enabled) {
+    if (!session.enabled) {
+      const msg = 'research was requested but no Tavily API key is configured (set TAVILY_API_KEY or the tavily-spt-dev Keychain entry).';
+      emit('research_skipped', { reason: msg });
+      if (researchExplicit) throw new Error(msg);
+    } else {
       emit('stage', { stage: 'research' });
       const brief = await session.brief(question, signal);
-      if (brief) {
+      if (brief && brief.sources.length) {
         briefText = brief.text;
         briefSources = brief.sources;
         emit('research_done', { sources: briefSources });
+      } else {
+        const reason = session.lastError
+          ? `Tavily search failed: ${session.lastError}`
+          : 'Tavily returned no results for this query.';
+        emit('research_error', { reason });
+        if (researchExplicit && session.lastError) throw new Error(`research: ${reason}`);
       }
-    } else {
-      emit('research_skipped', { reason: 'no Tavily API key configured' });
     }
   }
   const groundedQuestion = briefText ? `${memberQuestion}\n\n${briefText}` : memberQuestion;
