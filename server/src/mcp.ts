@@ -2,7 +2,6 @@
 // (Claude Code, Claude Desktop, or a hosted claude.ai connector) can convene
 // the council and get the synthesis back. Runs over stdio by default; pass
 // `--http` (or set MCP_HTTP=1) to serve Streamable HTTP for remote hosting.
-import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -398,8 +397,12 @@ async function main() {
     return;
   }
 
-  // Streamable HTTP for remote hosting (one transport per session id).
-  const transports = new Map<string, StreamableHTTPServerTransport>();
+  // Streamable HTTP for remote hosting — STATELESS: a fresh server + transport per
+  // request, no in-memory session map. This is what keeps the connector alive across
+  // deploys/instance changes: a new Cloud Run revision has no prior session state, and
+  // in stateful mode it would 404 the client's old Mcp-Session-Id (forcing a manual
+  // reconnect). Stateless does no session validation, so any instance serves any
+  // request transparently. (convene_council is request/response, so we lose nothing.)
   const port = Number(process.env.PORT ?? 8788);
 
   const oauthSecret = process.env.OAUTH_HMAC_SECRET;
@@ -436,28 +439,32 @@ async function main() {
       }
     }
 
-    const sid = req.headers['mcp-session-id'] as string | undefined;
-    let transport = sid ? transports.get(sid) : undefined;
-
-    if (!transport) {
-      transport = new StreamableHTTPServerTransport({
-        sessionIdGenerator: () => randomUUID(),
-        onsessioninitialized: (id) => { transports.set(id, transport!); },
-      });
-      transport.onclose = () => {
-        if (transport!.sessionId) transports.delete(transport!.sessionId);
-      };
-      await buildServer().connect(transport);
+    // Stateless mode has no server-initiated SSE stream or session lifecycle, so
+    // GET/DELETE on /mcp aren't used — answer them politely instead of erroring.
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST' })
+        .end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Method not allowed: this server is stateless; use POST.' } }));
+      return;
     }
 
-    // Read + parse the body for POSTs (GET/DELETE carry none).
+    // Read + parse the JSON-RPC body.
     let body: unknown;
-    if (req.method === 'POST') {
-      const chunks: Buffer[] = [];
-      for await (const c of req) chunks.push(c as Buffer);
-      const raw = Buffer.concat(chunks).toString('utf8');
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    const raw = Buffer.concat(chunks).toString('utf8');
+    try {
       body = raw ? JSON.parse(raw) : undefined;
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+        .end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }));
+      return;
     }
+
+    // Fresh server + transport for THIS request; torn down when the response closes.
+    const server = buildServer();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    res.on('close', () => { void transport.close(); void server.close(); });
+    await server.connect(transport);
     await transport.handleRequest(req, res, body);
   });
 
