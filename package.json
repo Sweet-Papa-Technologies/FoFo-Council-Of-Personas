@@ -12,6 +12,8 @@
     "dev:web": "npm --prefix app run dev",
     "start": "tsx server/src/index.ts",
     "council": "tsx server/src/cli.ts",
+    "mcp": "tsx server/src/mcp.ts",
+    "mcp:http": "tsx server/src/mcp.ts --http",
     "skill:install": "bash scripts/install-skill.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "secrets:set": "tsx scripts/secrets.ts set",
@@ -20,14 +22,16 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^16.4.7",
     "hono": "^4.6.14",
-    "yaml": "^2.6.1"
+    "tsx": "^4.19.2",
+    "yaml": "^2.6.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "concurrently": "^9.1.0",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

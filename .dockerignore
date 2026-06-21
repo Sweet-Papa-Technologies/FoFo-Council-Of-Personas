@@ -1,0 +1,10 @@
+node_modules
+app
+assets
+docs
+.git
+.github
+.claude
+.env
+*.log
+.mcp-test.mjs
