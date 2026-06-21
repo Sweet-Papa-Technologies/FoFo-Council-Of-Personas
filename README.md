@@ -277,6 +277,48 @@ with the Chairman's recommendation and offers the individual advisors' arguments
 
 ---
 
+## Use it from Claude via MCP
+
+The council is also an **MCP server** (`server/src/mcp.ts`), so an AI client can call
+it as a tool. It exposes one tool — **`convene_council`** (`question`, optional
+`peer_review`, `web_search`) — returning the Markdown report.
+
+### Claude Code / Claude Desktop (local, no hosting)
+
+This repo ships a `.mcp.json`, so **Claude Code picks the server up automatically**
+when you're in the project (approve it once). It runs over stdio via `npm run mcp`
+and reads your key from the Keychain/`.env` like everything else.
+
+### Hosted (remote, for use anywhere)
+
+The Streamable-HTTP transport (`npm run mcp:http`, or `MCP_HTTP=1`) is containerized
+(`Dockerfile`) and deployed to **Cloud Run** in project `fofoapps-934be`:
+
+```
+https://council-mcp-851869525836.us-central1.run.app/mcp
+```
+
+It's gated by a **bearer token** (`MCP_BEARER_TOKEN`, stored in Secret Manager as
+`council-mcp-token` and in your Keychain). The Gemini key lives in Secret Manager
+(`council-gemini-key`). Add it to Claude Code from any machine:
+
+```bash
+TOKEN=$(security find-generic-password -s council-of-personas -a MCP_BEARER_TOKEN -w)
+claude mcp add --transport http council \
+  https://council-mcp-851869525836.us-central1.run.app/mcp \
+  --header "Authorization: Bearer $TOKEN"
+```
+
+Redeploy after changes: `gcloud run deploy council-mcp --source . --project fofoapps-934be --region us-central1`.
+
+> **claude.ai web (Custom Connector):** the web app's custom-connector flow expects
+> **OAuth**, not a bearer token — so the endpoint above works with Claude Code/Desktop
+> but isn't yet addable in claude.ai web. Adding an OAuth layer (and the final
+> "add connector" step, which happens in your logged-in claude.ai account on a paid
+> plan) is the remaining piece.
+
+---
+
 ## Layout
 
 ```
