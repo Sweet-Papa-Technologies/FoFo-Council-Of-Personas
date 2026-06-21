@@ -163,7 +163,10 @@ const DISPLAY_HINT =
   'Lead with the `summary` tiles as a compact, mobile-friendly 2×2 card (Verdict / Confidence / ' +
   'Key dissent / Next step); show the rest as secondary detail.';
 
-const cell = (s: string) => s.replace(/\s+/g, ' ').replace(/\|/g, '∕').trim();
+// Tile values are plain text — strip markdown emphasis/code/heading markers and
+// pipes so nothing leaks broken markup into the compact card.
+const cell = (s: string) =>
+  s.replace(/[*_`#]+/g, '').replace(/\|/g, '∕').replace(/\s+/g, ' ').trim() || '—';
 
 function firstSentence(s: string, max = 150): string {
   const flat = s.replace(/\s+/g, ' ').trim();
@@ -203,7 +206,11 @@ function buildTiles(r: CouncilResult): SummaryTiles {
 
   const verdict = firstSentence(sec['RECOMMENDATION'] || '', 120) || (r.chairman.error ? 'Synthesis failed' : 'See synthesis');
   const nextStep = firstSentence(sec['NEXT STEP'] || '', 110) || '—';
-  const confidence = firstSentence(sec['CONFIDENCE'] || '', 95)
+  // Strip a leftover "& CRUXES" / "Confidence is" lead-in from the section text.
+  const confRaw = (sec['CONFIDENCE'] || '')
+    .replace(/^&?\s*(and\s+)?cruxe?s?\b[:\s—–-]*/i, '')
+    .replace(/^confidence\s+(is|level|:)?\s*/i, '');
+  const confidence = firstSentence(confRaw, 95)
     || (okCount < r.members.length ? `Tempered — ${r.members.length - okCount} seat(s) dropped` : '—');
 
   const da = r.devils_advocate?.content || '';
