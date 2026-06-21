@@ -1,0 +1,8 @@
+project_id    = "fofoapps-934be"
+region        = "us-central1"
+council_model = "gemini-3.5-flash"
+
+# Set to enable the Cloud Build push-to-deploy trigger (needs the Cloud Build
+# GitHub App connected to the repo). Leave github_owner empty to skip the trigger.
+github_owner = "Sweet-Papa-Technologies"
+github_repo  = "FoFo-Council-Of-Personas"

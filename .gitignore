@@ -7,3 +7,9 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# terraform
+infra/.terraform/
+infra/*.tfstate*
+infra/.terraform.lock.hcl
+infra/terraform.tfvars

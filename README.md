@@ -309,13 +309,27 @@ claude mcp add --transport http council \
   --header "Authorization: Bearer $TOKEN"
 ```
 
-Redeploy after changes: `gcloud run deploy council-mcp --source . --project fofoapps-934be --region us-central1`.
+### claude.ai web (Custom Connector — OAuth)
 
-> **claude.ai web (Custom Connector):** the web app's custom-connector flow expects
-> **OAuth**, not a bearer token — so the endpoint above works with Claude Code/Desktop
-> but isn't yet addable in claude.ai web. Adding an OAuth layer (and the final
-> "add connector" step, which happens in your logged-in claude.ai account on a paid
-> plan) is the remaining piece.
+The server is also a minimal **OAuth 2.1 Authorization Server** (`server/src/oauth.ts`)
+so it can be added as a **claude.ai custom connector** (paid plans). It implements
+discovery (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`),
+Dynamic Client Registration, PKCE-S256, and stateless signed-JWT tokens — all
+single-user-gated by one **consent passphrase**.
+
+To connect: claude.ai → **Settings → Connectors → Add custom connector** → paste the
+`/mcp` URL above. claude.ai runs the OAuth flow and shows a consent page — enter the
+passphrase (stored in Keychain as `OAUTH_PASSPHRASE`, and in Secret Manager as
+`council-oauth-passphrase`) and click **Authorize**. Claude Code's static bearer token
+still works too — both auth paths are accepted.
+
+### Infrastructure (Terraform + Cloud Build)
+
+The backend (APIs, Artifact Registry, the four secrets, Cloud Run service + secret
+wiring, IAM, and a push-to-deploy Cloud Build trigger) is codified in
+[`infra/`](infra/) (Terraform) + [`cloudbuild.yaml`](cloudbuild.yaml). See
+[`infra/README.md`](infra/README.md) for apply / import / CI setup. Quick redeploy
+without Terraform: `gcloud run deploy council-mcp --source . --project fofoapps-934be --region us-central1`.
 
 ---
 

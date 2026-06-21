@@ -9,6 +9,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import { runCouncil, type Emit } from './council';
+import { handleOAuth, validateAccessToken } from './oauth';
 
 interface Member {
   id: number;
@@ -135,18 +136,36 @@ async function main() {
   const transports = new Map<string, StreamableHTTPServerTransport>();
   const port = Number(process.env.PORT ?? 8788);
 
+  const oauthSecret = process.env.OAUTH_HMAC_SECRET;
+  const oauthPass = process.env.OAUTH_PASSPHRASE;
+  const oauthEnabled = !!(oauthSecret && oauthPass);
+  const staticToken = process.env.MCP_BEARER_TOKEN;
+
   const httpServer = createServer(async (req, res) => {
+    const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || `localhost:${port}`;
+    const proto = (req.headers['x-forwarded-proto'] as string) || (host.startsWith('localhost') ? 'http' : 'https');
+    const base = `${proto}://${host}`;
+    const ctx = { base, secret: oauthSecret ?? '', passphrase: oauthPass ?? '' };
+
+    // OAuth + discovery endpoints (for claude.ai web's custom-connector flow).
+    if (oauthEnabled && (await handleOAuth(req, res, ctx))) return;
+
     if (!req.url?.startsWith('/mcp')) {
       res.writeHead(404).end('Not found');
       return;
     }
-    // Bearer-token gate for the hosted endpoint (set MCP_BEARER_TOKEN in prod).
-    const required = process.env.MCP_BEARER_TOKEN;
-    if (required) {
-      const auth = req.headers['authorization'];
-      if (auth !== `Bearer ${required}`) {
-        res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' })
-          .end(JSON.stringify({ error: 'unauthorized' }));
+
+    // Auth gate: a static bearer (Claude Code) OR an OAuth access token (web).
+    if (oauthEnabled || staticToken) {
+      const auth = (req.headers['authorization'] as string) || '';
+      const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+      const okStatic = !!staticToken && bearer.length > 0 && bearer === staticToken;
+      const okOauth = oauthEnabled && bearer.length > 0 && validateAccessToken(bearer, ctx);
+      if (!okStatic && !okOauth) {
+        res.writeHead(401, {
+          'Content-Type': 'application/json',
+          'WWW-Authenticate': `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`,
+        }).end(JSON.stringify({ error: 'unauthorized' }));
         return;
       }
     }
